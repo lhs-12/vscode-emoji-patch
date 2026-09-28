@@ -1,47 +1,96 @@
 <h1><center>Emoji Patch (VSCode 扩展)</center></h1>
 
-个人专用扩展: 让 VSCode 的 emoji 与 kitty 表现一致 (彩色 + 严格 2 格宽), 并让 markdowntable 的表格格式化改走 oxfmt.  
-设计与取舍见 `DESIGN.md`.
+个人专用小扩展, 给 VSCode 补两件事:
 
-## 适用环境
+1. emoji 用彩色的 **Noto Color Emoji** 显示, 并且严格占 2 格宽;
+2. markdown 表格的列宽改由 **oxfmt** 计算, 不再用 markdowntable 自带那套.
 
-- Linux + AUR 安装的 VSCode (`visual-studio-code-bin`, 装在 `/usr/share/code`), 写入需 `pkexec` 提权.
-- 编辑器的字体链会被"顶替"第一个族 (默认 `Iosevka Term`): 不新增族名, 只把 emoji 码点分流给 `Noto Color Emoji`, 其余字符不受影响.
+只服务本机这套环境 (Linux + AUR 装的 VSCode), 不打算发到 Marketplace.
+
+## 装之前 / 装之后
+
+| 场景                                                    | 装之前                                                   | 装之后                                  |
+| ------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------- |
+| `✅` `❌` `🎉` 这类 emoji                               | 用正文的等宽字体画, 黑白、窄                             | 走 Noto Color Emoji, 彩色, 正好 2 格宽  |
+| emoji 混在中文或表格里                                  | 宽度对不上, 表格竖线跟着歪                               | 宽度与中文一致, 不用再手动补空格        |
+| markdown 表格格式化 (Tab 跳格 / 对齐 / Format Document) | markdowntable 自己数字符宽度, 碰到 emoji、全角符号会算错 | 交给 oxfmt 算, 和你手写表格时的口径一致 |
+
+## 具体改了哪三处
+
+1. **emoji 换字体** —— 只影响 emoji 码点. 其它字符仍然用你配置的第一个字体 (默认 `Iosevka Term`), 字重、斜体、连字都照旧.
+2. **宽度锁成 2 格** —— 为此 emoji 被整体缩到 80.3%, 看起来比 Noto 原本的尺寸小一圈; 换来的是和中文一样宽, 表格不再错位.
+3. **表格格式化换工具** —— markdowntable 的增删行列、Tab 跳格、对齐等操作都改走 oxfmt. 它的安装文件没有被改过, 关掉本扩展就回到原样.
+
+## 哪些地方生效
+
+| 区域                                  | 是否生效      | 说明                                                                             |
+| ------------------------------------- | ------------- | -------------------------------------------------------------------------------- |
+| 编辑器                                | ✅            | 普通编辑、diff、Notebook 单元格                                                  |
+| 终端 / 调试控制台                     | ⚠️ 要自己对齐 | 这两处的字体是单独的配置项. 把它们的字体族写成和编辑器第一个族一样即可 (见下)    |
+| Markdown 预览 / 扩展面板 (Draw.io 等) | ❌            | 它们是独立文档, 用不到; 这类地方的 emoji 会直接落到 Noto Color Emoji, 彩色但偏宽 |
+
+终端与调试控制台补齐写法:
+
+```jsonc
+"terminal.integrated.fontFamily": "'Iosevka Term', monospace",
+"debug.console.fontFamily": "'Iosevka Term', monospace",
+```
 
 ## 命令
 
-| 命令                | 作用                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `Emoji Patch: 生效` | 生成/更新 `unicode-range`, 写入 `workbench.html` 的标记块, 同步 `product.json` checksum, 然后重载窗口 |
-| `Emoji Patch: 失效` | 删除标记块并还原 checksum, 然后重载窗口                                                               |
+| 命令                | 作用                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| `Emoji Patch: 生效` | 写入样式并让 VSCode 认可, 然后在提示里点"重新加载窗口"; 已经生效时会提示"无需变更" |
+| `Emoji Patch: 失效` | 全部还原, 同样在提示里点"重新加载窗口"                                             |
 
-## 它做什么
+两个命令都在命令面板 (`Ctrl+Shift+P`) 里搜 `Emoji Patch`.
 
-1. **字体分流**: 用 `@font-face` 抢用 `editor.fontFamily` 第一个族的名字, 只把 emoji 码点交给 Noto Color Emoji (`size-adjust: 80.3%` → 恰好 2 格). 配置里不需要出现任何 patch 名字.
-2. **注入 CSS**: 需要写 `workbench.html` (VSCode 没有注入 CSS 的扩展 API), 通过 `pkexec` 提权, 全程用临时目录, 不留持久数据.
-3. **劫持表格格式化**: 在内存里包装 markdowntable 的 `toFormatTableStr`, 让它的所有格式化操作改走 oxfmt. 不改它的磁盘文件.
+## 上手 (拿到项目之后)
 
-## 安装与升级
+### 1. 装依赖
 
 ```bash
-aubr package                                         # 出 emoji-patch-<ver>.vsix
-code --install-extension emoji-patch-*.vsix --force   # 装 / 覆盖
+mise install    # 工具: node / aube / oxlint / oxfmt
+                # 版本与全局 mise 配置一致, 本机已装的话直接复用, 不会重复下载
+
+aube install    # 包依赖: @types/node, @types/vscode, typescript
 ```
 
-VSCode 升级会覆盖 `workbench.html`, patch 随之失效 —— 重跑一次 `Emoji Patch: 生效` 即可, 不必重装扩展.
-
-## 开发
+### 2. 编译并装进 VSCode
 
 ```bash
-mise install        # 工具依赖 (node/aube/oxlint/oxfmt): 版本与全局 mise 配置一致, 直接复用
+aubr package                                         # 生成 emoji-patch-<版本>.vsix
 
-aube install        # 包依赖 (仅 @types/node, @types/vscode, typescript)
-
-aubr build          # tsc -> out/
-aubr test           # 无依赖测试 (21 项)
-aubr lint           # oxlint
-aubr format         # oxfmt
-aubr package        # 出 .vsix
+code --install-extension emoji-patch-*.vsix --force   # 装 (已经装过就覆盖)
 ```
 
-工具的版本声明在 `mise.toml`, 取舍理由见 `DESIGN.md` 的"工具链"章节.
+装完重载 VSCode 窗口 (或重启) 让扩展加载.
+
+### 3. 让它生效
+
+命令面板 → `Emoji Patch: 生效` → 弹出 polkit 授权 (扩展要改 VSCode 安装目录里的一个 html 文件) → 授权成功后点提示里的"重新加载窗口".  
+之后 `✅❌🎉` 应该就是彩色 2 格宽了.
+
+### 4. 日常与升级后
+
+- **VSCode 升级后**: 升级会覆盖那个 html 文件, patch 随之失效 —— 再点一次 `Emoji Patch: 生效` 即可, 不用重装扩展.
+- **想临时关掉**: 跑 `Emoji Patch: 失效`. 注意只禁用扩展是不够的, 样式还留在文件里.
+- **想彻底回到原样**: `Emoji Patch: 失效`, 或者 `sudo pacman -S visual-studio-code-bin` 重装 VSCode (那两个文件直接覆盖).
+- **想让 emoji 表跟上 Unicode 新版本**: 跑一次 `生效` 就会重新拉取码点表.
+
+## 改功能 / 开发
+
+代码在 `src/`, 编译到 `out/`:
+
+```bash
+aubr build    # 编译一次 (tsc -> out/)
+aubr watch    # 改代码时持续编译
+aubr test     # 21 项无依赖测试 (含端到端)
+aubr lint     # oxlint (整仓)
+aubr format   # oxfmt (整仓, 含本文件与 DESIGN.md)
+aubr check    # tsc --noEmit + oxlint
+```
+
+改完要让新代码生效, 重复"上手"里的第 2、3 步: `aubr package` → 装 → 命令面板 `生效`.
+
+为什么要这么做、为什么不选别的做法 (字体族怎么顶替, 为什么必须改 `workbench.html`, checksum 是怎么回事, oxfmt 有哪些 round-trip 差异…), 都记在 `DESIGN.md`.
