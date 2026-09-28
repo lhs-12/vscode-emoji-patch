@@ -277,8 +277,10 @@ async function main() {
       },
     },
   };
-  const previewHtml =
+  const mpeHtml =
     '<!doctype html>\n<html>\n<head>\n<meta id="crossnote-data" data-config="{}">\n</head>\n<body></body>\n</html>\n';
+  const builtinHtml =
+    '<!DOCTYPE html>\n<html style="--vscode-x:y">\n<head>\n<meta charset="UTF-8">\n<meta id="vscode-markdown-preview-data" data-settings="{}" data-initial-md-content="x">\n</head>\n<body class="vscode-body">\n</body>\n</html>';
   const loadPreview = (stub) => {
     const p = path.join(OUT, 'preview.js');
     delete require.cache[p];
@@ -296,28 +298,52 @@ async function main() {
     }
   };
   const previewMod = loadPreview(PREVIEW_STUB);
-  await test('预览注入: 命中预览 shell 时插到 </head> 之前', () => {
-    const out = previewMod.injectPreviewCss(previewHtml, inner);
+  const face = cssBlock.parseCssBlock(inner);
+  const rules = [previewMod.mpePreviewRule(inner), previewMod.vscodePreviewRule(face)];
+  const fallbackCss = rules[1].css;
+
+  await test('parseCssBlock: 与 buildCssBlock 往返一致', () => {
+    assert.deepEqual(face, { notoFamily: 'Noto Color Emoji', sizeAdjust: '80.3%', unicodeRange: 'U+2705, U+274C' });
+    assert.equal(cssBlock.parseCssBlock('没有 font-face'), undefined);
+  });
+  await test('预览规则: 两条规则各认各的 shell', () => {
+    assert.equal(rules[0].marker, 'crossnote-data');
+    assert.equal(rules[1].marker, 'vscode-markdown-preview-data');
+    assert.ok(!fallbackCss.includes('Iosevka Term'), '自带预览不顶替族名, 也不碰预览自己的字体');
+    assert.ok(fallbackCss.includes(`"${consts.PREVIEW_FAMILY}", var(--markdown-font-family`));
+    assert.ok(fallbackCss.includes(`"${consts.PREVIEW_FAMILY}", var(--vscode-editor-font-family`));
+  });
+  await test('预览注入: MPE shell 用 workbench 那份块, 插到 </head> 之前', () => {
+    const out = previewMod.injectPreviewCss(mpeHtml, rules);
     assert.ok(out);
     assert.ok(out.includes('<style>'));
+    assert.ok(out.includes('@font-face'));
     assert.ok(out.indexOf('@font-face') < out.indexOf('</head>'));
   });
-  await test('预览注入: 非预览 HTML (含缺 </head> 的) 一律不碰', () => {
-    assert.equal(previewMod.injectPreviewCss(sampleHtml, inner), undefined);
-    assert.equal(previewMod.injectPreviewCss('crossnote-data 但没有 head', inner), undefined);
+  await test('预览注入: 自带预览 shell 用前插族名的块', () => {
+    const out = previewMod.injectPreviewCss(builtinHtml, rules);
+    assert.ok(out);
+    assert.ok(out.includes(consts.PREVIEW_FAMILY));
+    assert.ok(out.includes('@font-face'));
+    assert.ok(out.indexOf(consts.PREVIEW_FAMILY) < out.indexOf('</head>'));
   });
-  await test('预览注入: 已含同一份块时不重复插', () => {
-    const once = previewMod.injectPreviewCss(previewHtml, inner);
-    assert.equal(previewMod.injectPreviewCss(once, inner), undefined);
+  await test('预览注入: 非预览 HTML / 缺 </head> / 已插过 都不动', () => {
+    assert.equal(previewMod.injectPreviewCss(sampleHtml, rules), undefined);
+    assert.equal(previewMod.injectPreviewCss('crossnote-data 但没有 head', rules), undefined);
+    const once = previewMod.injectPreviewCss(mpeHtml, rules);
+    assert.equal(previewMod.injectPreviewCss(once, rules), undefined);
   });
-  await test('预览劫持: 装上后赋值预览 HTML 会被注入, 借的面板立刻 dispose', () => {
-    const r = previewMod.installPreviewPatch(inner);
+  await test('预览劫持: 两种预览都被注入, 借的面板立刻 dispose', () => {
+    const r = previewMod.installPreviewPatch(rules);
     assert.equal(r.installed, true);
     assert.equal(fakePanels.length, 1);
     assert.equal(fakePanels[0].disposed, true);
-    const wv = new FakeWebview();
-    wv.html = previewHtml;
-    assert.ok(wv.html.includes('@font-face'));
+    const mpe = new FakeWebview();
+    mpe.html = mpeHtml;
+    assert.ok(mpe.html.includes('@font-face'));
+    const builtin = new FakeWebview();
+    builtin.html = builtinHtml;
+    assert.ok(builtin.html.includes(consts.PREVIEW_FAMILY));
     assert.equal(previewMod.isPreviewPatched(), true);
   });
   await test('预览劫持: 其它 webview 原样通过', () => {
@@ -327,15 +353,14 @@ async function main() {
     assert.equal(wv.html, plain);
   });
   await test('预览劫持: 重复安装是 no-op (不再借面板)', () => {
-    const r = previewMod.installPreviewPatch(inner);
-    assert.equal(r.installed, true);
+    assert.equal(previewMod.installPreviewPatch(rules).installed, true);
     assert.equal(fakePanels.length, 1);
   });
   await test('预览劫持: 卸载后恢复原样, 重复卸载返回 false', () => {
     assert.equal(previewMod.uninstallPreviewPatch(), true);
     assert.equal(previewMod.isPreviewPatched(), false);
     const wv = new FakeWebview();
-    wv.html = previewHtml;
+    wv.html = mpeHtml;
     assert.ok(!wv.html.includes('@font-face'));
     assert.equal(previewMod.uninstallPreviewPatch(), false);
   });

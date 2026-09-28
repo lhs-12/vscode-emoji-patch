@@ -36,7 +36,7 @@ Iosevka Term 自带 `✅❌` 字形, 所以显示为单色窄体; Chromium 没�
 | 3   | 升级后重新生效              | VSCode 升级后, 一条命令恢复 patch                               |
 | 4   | 更新 `unicode-range`        | 不升级 VSCode 也能刷新 emoji 码点集合                           |
 | 5   | 劫持 markdowntable 的格式化 | 该插件所有会重排表格的操作都改走 oxfmt                          |
-| 6   | 预览也生效                  | Markdown Preview Enhanced 的预览里, emoji 同样彩色且恰好 2 格   |
+| 6   | 预览也生效                  | MPE 与 VSCode 自带的预览里, emoji 同样彩色且恰好 2 格           |
 
 ## 约束
 
@@ -284,10 +284,18 @@ if (!helper.__emojiPatchWrapped) {
 
 Markdown Preview Enhanced (MPE) 的预览是独立 webview 文档, workbench 里那份 CSS 进不去. 但它也不需要提权 —— 可以纯内存拦:
 
-- MPE 在扩展宿主里把预览 HTML 拼好, 整段赋给 `panel.webview.html`: 头部带 `<meta id="crossnote-data">`, 里面已经嵌了 `style.less` 的 CSS 与 `head.html` 的内容.
-- 预览正文由 webview 端用 `innerHTML` 渲染进**同一个** document, 所以往这段 HTML 的 `</head>` 里插一个 `<style>` 就能生效 —— `style.less` 走的正是这条通道.
-- 所以: 换掉 webview 类**原型**上的 `html` 访问器, 赋值时命中预览 shell 就顺手插一份 `@font-face` 块. 块的内容直接从当前 `workbench.html` 的标记块里取, 与编辑器永远一致 (即两者用的是同一个字体族名).
-- 原型怎么拿: `createWebviewPanel` 建一个空面板 → 取 `webview` 的原型 → 立刻 `dispose()`. API 没有暴露 webview 类, 别的扩展的 webview 也拿不到, 只能借一下.
+- 两边都在扩展宿主里把预览 HTML 拼好, 整段赋给 `panel.webview.html`: MPE 的头部带 `<meta id="crossnote-data">` (里面嵌了 `style.less` 与 `head.html` 的内容), 自带的带 `<meta id="vscode-markdown-preview-data">`.
+- 两边正文都是 webview 端用 `innerHTML` / `body.append()` 渲染进**同一个** document (没有 iframe), 所以往这段 HTML 的 `</head>` 里插一个 `<style>` 就能生效 —— MPE 的 `style.less` 走的正是这条通道.
+- 所以: 换掉 webview 类**原型**上的 `html` 访问器, 赋值时命中哪种预览 shell 就插对应的 CSS. 原型的拿法: `createWebviewPanel` 建一个空面板 → 取 `webview` 的原型 → 立刻 `dispose()` (API 没暴露 webview 类, 别的扩展的 webview 也拿不到).
+
+两边字体来源不同, 所以注入手法也不同:
+
+| 预览        | 字体来自                                     | 注入手法                                                                                                 |
+| ----------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| MPE         | `style.less` 里写死的 `font-family`          | **顶替那个族名** —— 和编辑器同手法, 直接复用 `workbench.html` 里那份块                                   |
+| VSCode 自带 | `var(--markdown-font-family)` (preview 设置) | **前插一个只覆盖 emoji 码点的族**: 范围内走缩放过的 Noto, 其余字符因该族没有字形而照旧落到预览自己的字体 |
+
+两种手法的参数都从 `workbench.html` 那份块里取 (`extractBlock` + `parseCssBlock`), 所以预览与编辑器永远同一套 range / 缩放值, 也不需要联网重算.
 
 原型级包装与激活顺序无关: 只要早于"下一次给 webview 赋 HTML"即可 (为什么不能走更正规的 `registerCustomEditorProvider`, 见 [方案选用的考虑](#为什么不包装-registercustomeditorprovider)).
 
@@ -300,7 +308,8 @@ Markdown Preview Enhanced (MPE) 的预览是独立 webview 文档, workbench 里
 | 编辑器               | ✅       | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                              |
 | 终端                 | 部分     | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
 | 调试控制台           | 部分     | 走 `debug.console.fontFamily`, 同上                                                        |
-| MPE 的 Markdown 预览 | ✅       | 走预览注入 (见下), 同样要求字体链的第一个族与编辑器一致                                    |
+| MPE 的 Markdown 预览 | ✅       | 走预览注入 (顶替族名), 要求它字体链的第一个族与编辑器一致                                  |
+| 自带的 Markdown 预览 | ✅       | 走预览注入 (前插族名), 不依赖也不改它的字体设置                                            |
 | 其它 webview         | ❌       | Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到                       |
 
 终端与调试控制台补齐写法 (关键是**族名一致**, 不再需要 `'EmojiPatch'`):
@@ -312,7 +321,7 @@ Markdown Preview Enhanced (MPE) 的预览是独立 webview 文档, workbench 里
 
 > 没被注入的 webview (含其它预览插件) 里的 emoji 会直接落到 `Noto Color Emoji`, 是彩色但 ~2.5 格, 不经 `size-adjust`; 这是独立文档的固有限制.
 >
-> MPE 预览里唯一需要配合的是它自己的字体链: `style.less` 里 `font-family` 的第一个族要和编辑器一致 (本机已统一为 `'Iosevka Term', 'MiSans', …`). 注入的 `@font-face` 顶替的就是那个名字, 对不上就只是不生效, 不会变丑.
+> MPE 预览里唯一需要配合的是它自己的字体链: `style.less` 里 `font-family` 的第一个族要和编辑器一致 (本机已统一为 `'Iosevka Term', 'MiSans', …`). 注入的 `@font-face` 顶替的就是那个名字, 对不上就只是不生效, 不会变丑. 自带预览没这个要求 (它是前插族名, 预览自己的字体设置照旧生效).
 
 ---
 
@@ -481,7 +490,7 @@ vscode-emoji-patch/
 │   ├── hijack.ts                # 内存包装 markdowntable 的 toFormatTableStr
 │   ├── preview.ts               # 内存包装 webview 的 html, 给 MPE 预览注入字体块
 │   └── commands.ts              # 生效 / 失效 两个命令
-├── test/run.js                  # 无依赖测试 (31 项, 含端到端)
+├── test/run.js                  # 无依赖测试 (33 项, 含端到端)
 └── out/                         # 构建产物
 ```
 
@@ -520,8 +529,9 @@ text.replace(re, `$1${newChecksum}$2`);
 
 ### 预览注入的细节
 
-- 字体块内容用 `extractBlock()` 从当前 `workbench.html` 的标记块里取: 预览与编辑器必然是同一份, 也不需要联网重算 range.
-- 只碰带 `<meta id="crossnote-data">` 的 HTML, 其它 webview 原样通过; 已含同一份块时不再重复插.
+- 字体块内容用 `extractBlock()` 从当前 `workbench.html` 的标记块里取, emoji 那条 `@font-face` 的参数用 `parseCssBlock()` 解析: 预览与编辑器必然是同一份, 也不需要联网重算 range.
+- 两条规则各认各的 shell (`crossnote-data` / `vscode-markdown-preview-data`), 其它 webview 原样通过; 已含同一份 CSS 时不再重复插.
+- 自带预览前插的族名用 `EmojiPatchPreview`: 它只有 emoji 范围内的字形, 不会改变预览本来用什么字体 (含 `markdown.preview.fontFamily` 设置).
 - 安装时借一个临时面板取原型并立刻 `dispose()`; 卸载时把原访问器原样装回 (`失效` 命令会调).
 - 已经渲染出来的预览不会变 —— 预览面板只在创建/重建时赋 HTML, 所以要让某个已开的预览恢复/生效, 重新打开它.
 
@@ -668,16 +678,23 @@ oxlint = "latest"
 
 # 里程碑
 
-| #   | 内容                                                                      | 状态 |
-| --- | ------------------------------------------------------------------------- | ---- |
-| 1   | 骨架: 扩展激活, 注册 `生效` / `失效` 两个命令                             | ✅   |
-| 2   | 内存包装 `toFormatTableStr`, 用真实 markdowntable 模块验证输出 == oxfmt   | ✅   |
-| 3   | 按族名顶替法生成 CSS 块, 注入后 emoji 分流且普通文本不受影响              | ✅   |
-| 4   | `pkexec` 提权写入 + checksum 同步 + 幂等 (假 pkexec + 假 codeRoot 端到端) | ✅   |
-| 5   | 收尾: 移除 dotfiles 里 `'EmojiPatch', ` 前缀; 删除旧的 plan 文档          | ✅   |
-| 6   | 预览注入: 内存劫持 webview 的 `html`, MPE 预览与编辑器同一个字体族        | ✅   |
+| #   | 内容                                                                       | 状态 |
+| --- | -------------------------------------------------------------------------- | ---- |
+| 1   | 骨架: 扩展激活, 注册 `生效` / `失效` 两个命令                              | ✅   |
+| 2   | 内存包装 `toFormatTableStr`, 用真实 markdowntable 模块验证输出 == oxfmt    | ✅   |
+| 3   | 按族名顶替法生成 CSS 块, 注入后 emoji 分流且普通文本不受影响               | ✅   |
+| 4   | `pkexec` 提权写入 + checksum 同步 + 幂等 (假 pkexec + 假 codeRoot 端到端)  | ✅   |
+| 5   | 收尾: 移除 dotfiles 里 `'EmojiPatch', ` 前缀; 删除旧的 plan 文档           | ✅   |
+| 6   | 预览注入: 内存劫持 webview 的 `html`, MPE 预览与编辑器同一个字体族         | ✅   |
+| 7   | 自带 Markdown 预览: 同一处劫持里前插 `EmojiPatchPreview`, 不动它的字体设置 | ✅   |
 
 已在真实 VSCode 上跑通全流程 (提权注入 → checksum 同步 → 重载窗口 → emoji 彩色且严格 2 格), 日常使用正常.
+
+预览注入在真实 VSCode 里核对过 (用一层外包的检查器读回 `panel.webview.html`):
+
+- MPE: HTML 14867 → 16083 字节, 注入的是 `font-family: "Iosevka Term"` + `size-adjust: 80.3%`
+- 自带: 注入了 `var(--markdown-font-family)` 同级的 `EmojiPatchPreview` 族 + 同一条 `size-adjust`
+- Edge 实测同构文档: 自带预览里 ✅❌ 由 2.50 格收窄到 2.00 格, 而预览自己的字体 (x 走 Segoe UI / 中文走 MiSans VF) 一字未变; MPE 预览里 ✅❌ 由 1.00 格黑白变 2.00 格彩色
 
 ---
 

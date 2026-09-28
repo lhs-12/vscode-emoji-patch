@@ -4,6 +4,10 @@ export const MARKER_END = '/* == emoji-patch:end == */';
 
 /** MPE 预览 shell 的特征 (它带一个 `<meta id="crossnote-data">`). */
 export const MPE_PREVIEW_MARKER = 'crossnote-data';
+/** VSCode 自带 markdown 预览 shell 的特征 (`<meta id="vscode-markdown-preview-data">`). */
+export const VSCODE_PREVIEW_MARKER = 'vscode-markdown-preview-data';
+/** 注入自带预览时用的临时族名: 只覆盖 emoji 码点, 其余字符继续落到预览自己的字体. */
+export const PREVIEW_FAMILY = 'EmojiPatchPreview';
 /** 借 webview 原型时用的临时面板 viewType (只为拿类, 建完立刻 dispose). */
 export const PREVIEW_PROBE_VIEW_TYPE = 'emojiPatchProbe';
 

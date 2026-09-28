@@ -2,11 +2,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { MDT_EXT_ID, PRODUCT_REL, WORKBENCH_REL } from './const';
-import { buildCssBlock } from './cssBlock';
+import { buildCssBlock, parseCssBlock } from './cssBlock';
 import { writeAsRoot, type PrivilegedWrite } from './elevate';
 import { hijackTableFormatter, type HijackResult } from './hijack';
 import { resolveOxfmt } from './oxfmtPath';
-import { installPreviewPatch, uninstallPreviewPatch, type PreviewResult } from './preview';
+import {
+  installPreviewPatch,
+  mpePreviewRule,
+  uninstallPreviewPatch,
+  vscodePreviewRule,
+  type PreviewResult,
+} from './preview';
 import { buildUnicodeRange, extractRangeFromHtml, fetchEmojiSequences } from './range';
 import { extractBlock, hasBlock, injectBlock, sha256Base64, stripBlock, updateChecksum } from './workbench';
 
@@ -114,8 +120,11 @@ export function setupTableHijack(): HijackResult | undefined {
 }
 
 /**
- * 内存包装: 拦住 webview 的 html 赋值, 给 MPE 预览注入同一份字体块 (不落盘).
- * 字体块直接从当前的 workbench.html 里取, 所以预览跟编辑器永远一致, 也不需要联网重算 range.
+ * 内存包装: 拦住 webview 的 html 赋值, 给各家的 markdown 预览注入 emoji 字体 (不落盘).
+ *
+ * - MPE: 顶替它字体链的第一个族, 直接复用 workbench.html 里那份块 → 与编辑器必然一致.
+ * - VSCode 自带: 它的字体走 `var(--markdown-font-family)`, 顶替族名没意义, 改成前插一个只覆盖
+ *   emoji 码点的族 (参数从上面那份块里解析出来).
  */
 export function setupPreviewPatch(): PreviewResult | undefined {
   if (!conf<boolean>('patchPreview')) {
@@ -130,7 +139,11 @@ export function setupPreviewPatch(): PreviewResult | undefined {
   if (!inner) {
     return { installed: false, message: 'workbench 未注入' };
   }
-  return installPreviewPatch(inner);
+  const face = parseCssBlock(inner);
+  if (!face) {
+    return { installed: false, message: 'workbench 字体块解析失败' };
+  }
+  return installPreviewPatch([mpePreviewRule(inner), vscodePreviewRule(face)]);
 }
 
 /** 跑一条内存包装的状态文案. */

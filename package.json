@@ -1,7 +1,7 @@
 {
   "name": "emoji-patch",
   "displayName": "Emoji Patch",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "个人专用: 让 emoji 走 Noto Color Emoji (彩色 + 严格 2 格), 并让 markdowntable 的格式化改走 oxfmt",
   "categories": [
@@ -71,7 +71,7 @@
         "emojiPatch.patchPreview": {
           "type": "boolean",
           "default": true,
-          "description": "给 Markdown Preview Enhanced 的预览注入同一份 emoji 字体块 (仅内存劫持 webview, 不改任何文件)"
+          "description": "给 Markdown 预览 (MPE / VSCode 自带) 注入同一份 emoji 字体 (仅内存劫持 webview, 不改任何文件)"
         }
       }
     }

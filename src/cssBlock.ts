@@ -18,3 +18,18 @@ export function buildCssBlock(opts: {
     `@font-face { font-family: "${font}"; src: local("${opts.notoFamily}"); size-adjust: ${opts.sizeAdjust}; unicode-range: ${opts.unicodeRange}; }`,
   ].join('\n');
 }
+
+export interface EmojiFace {
+  notoFamily: string;
+  sizeAdjust: string;
+  unicodeRange: string;
+}
+
+/** 从已生成的块里取回 emoji 那条 @font-face 的参数 (预览注入要复用同一份设置). */
+export function parseCssBlock(block: string): EmojiFace | undefined {
+  const m = /src: local\("([^"]+)"\); size-adjust: ([^;]+); unicode-range: ([^;]+);/.exec(block);
+  if (!m) {
+    return undefined;
+  }
+  return { notoFamily: m[1], sizeAdjust: m[2], unicodeRange: m[3] };
+}

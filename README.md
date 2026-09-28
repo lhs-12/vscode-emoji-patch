@@ -14,14 +14,14 @@
 | `✅` `❌` `🎉` 这类 emoji                               | 用正文的等宽字体画, 黑白、窄                             | 走 Noto Color Emoji, 彩色, 正好 2 格宽  |
 | emoji 混在中文或表格里                                  | 宽度对不上, 表格竖线跟着歪                               | 宽度与中文一致, 不用再手动补空格        |
 | markdown 表格格式化 (Tab 跳格 / 对齐 / Format Document) | markdowntable 自己数字符宽度, 碰到 emoji、全角符号会算错 | 交给 oxfmt 算, 和你手写表格时的口径一致 |
-| Markdown Preview Enhanced 的预览                        | emoji 黑白、偏窄 (走预览自己的字体)                      | 和编辑器一致: 彩色, 恰好 2 格宽         |
+| Markdown 预览 (MPE / VSCode 自带)                       | emoji 黑白、偏窄 (走预览自己的字体)                      | 和编辑器一致: 彩色, 恰好 2 格宽         |
 
 ## 具体改了哪四处
 
 1. **emoji 换字体** —— 只影响 emoji 码点. 其它字符仍然用你配置的第一个字体 (默认 `Iosevka Term`), 字重、斜体、连字都照旧.
 2. **宽度锁成 2 格** —— 为此 emoji 被整体缩到 80.3%, 看起来比 Noto 原本的尺寸小一圈; 换来的是和中文一样宽, 表格不再错位.
 3. **表格格式化换工具** —— markdowntable 的增删行列、Tab 跳格、对齐等操作都改走 oxfmt. 它的安装文件没有被改过, 关掉本扩展就回到原样.
-4. **预览也注入同一份字体** —— 拦下 Markdown Preview Enhanced 渲染预览时写的 HTML, 在内存里把同一段 CSS 插进它的 `head`. 不写任何文件: `~/.config/crossnote/` (包括 `style.less`) 和 MPE 扩展目录都没改过.
+4. **两种 Markdown 预览也注入同一份字体** —— 拦下预览插件 / VSCode 渲染预览时写的 HTML, 在内存里把 CSS 插进它的 `head`. 不写任何文件: `~/.config/crossnote/` (包括 `style.less`)、MPE 扩展目录、`settings.json` 都没改过.
 
 ## 哪些地方生效
 
@@ -29,7 +29,8 @@
 | -------------------------------- | -------- | ----------------------------------------------------------------------------- |
 | 编辑器                           | ✅       | 普通编辑、diff、Notebook 单元格                                               |
 | 终端 / 调试控制台                | 部分     | 这两处的字体是单独的配置项. 把它们的字体族写成和编辑器第一个族一样即可 (见下) |
-| Markdown Preview Enhanced 的预览 | ✅       | 需要满足两个前提: 装了 MPE, 且它的 `font-family` 第一个族和编辑器相同         |
+| MPE 的 Markdown 预览             | ✅       | 需要它的 `font-family` 第一个族和编辑器相同 (本机已在 `style.less` 里统一)    |
+| VSCode 自带的 Markdown 预览      | ✅       | 不需要额外配置; 预览自己的字体 (含 `markdown.preview.fontFamily`) 照旧生效    |
 | 其它预览 / 扩展面板 (Draw.io 等) | ❌       | 独立文档, 用不到; 这类地方的 emoji 会直接落到 Noto Color Emoji, 彩色但偏宽    |
 
 终端与调试控制台补齐写法:
@@ -90,7 +91,7 @@ code --install-extension emoji-patch-*.vsix --force   # 装 (已经装过就覆�
 ```bash
 aubr build    # 编译一次 (tsc -> out/)
 aubr watch    # 改代码时持续编译
-aubr test     # 31 项无依赖测试 (含端到端)
+aubr test     # 33 项无依赖测试 (含端到端)
 aubr lint     # oxlint (整仓)
 aubr format   # oxfmt (整仓, 含本文件与 DESIGN.md)
 aubr check    # tsc --noEmit + oxlint
