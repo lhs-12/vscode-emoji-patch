@@ -2,7 +2,7 @@
 
 个人专用小扩展, 给 VSCode 补两件事:
 
-1. emoji 用彩色的 **Noto Color Emoji** 显示, 并且严格占 2 格宽;
+1. emoji 用彩色的 **Noto Color Emoji** 显示, 并且严格占 2 格宽 (编辑器 / 终端 / Markdown 预览);
 2. markdown 表格的列宽改由 **oxfmt** 计算, 不再用 markdowntable 自带那套.
 
 只服务本机这套环境 (Linux + AUR 装的 VSCode), 不打算发到 Marketplace.
@@ -14,20 +14,23 @@
 | `✅` `❌` `🎉` 这类 emoji                               | 用正文的等宽字体画, 黑白、窄                             | 走 Noto Color Emoji, 彩色, 正好 2 格宽  |
 | emoji 混在中文或表格里                                  | 宽度对不上, 表格竖线跟着歪                               | 宽度与中文一致, 不用再手动补空格        |
 | markdown 表格格式化 (Tab 跳格 / 对齐 / Format Document) | markdowntable 自己数字符宽度, 碰到 emoji、全角符号会算错 | 交给 oxfmt 算, 和你手写表格时的口径一致 |
+| Markdown Preview Enhanced 的预览                        | emoji 黑白、偏窄 (走预览自己的字体)                      | 和编辑器一致: 彩色, 恰好 2 格宽         |
 
-## 具体改了哪三处
+## 具体改了哪四处
 
 1. **emoji 换字体** —— 只影响 emoji 码点. 其它字符仍然用你配置的第一个字体 (默认 `Iosevka Term`), 字重、斜体、连字都照旧.
 2. **宽度锁成 2 格** —— 为此 emoji 被整体缩到 80.3%, 看起来比 Noto 原本的尺寸小一圈; 换来的是和中文一样宽, 表格不再错位.
 3. **表格格式化换工具** —— markdowntable 的增删行列、Tab 跳格、对齐等操作都改走 oxfmt. 它的安装文件没有被改过, 关掉本扩展就回到原样.
+4. **预览也注入同一份字体** —— 拦下 Markdown Preview Enhanced 渲染预览时写的 HTML, 在内存里把同一段 CSS 插进它的 `head`. 不写任何文件: `~/.config/crossnote/` (包括 `style.less`) 和 MPE 扩展目录都没改过.
 
 ## 哪些地方生效
 
-| 区域                                  | 是否生效 | 说明                                                                             |
-| ------------------------------------- | -------- | -------------------------------------------------------------------------------- |
-| 编辑器                                | ✅       | 普通编辑、diff、Notebook 单元格                                                  |
-| 终端 / 调试控制台                     | 部分     | 这两处的字体是单独的配置项. 把它们的字体族写成和编辑器第一个族一样即可 (见下)    |
-| Markdown 预览 / 扩展面板 (Draw.io 等) | ❌       | 它们是独立文档, 用不到; 这类地方的 emoji 会直接落到 Noto Color Emoji, 彩色但偏宽 |
+| 区域                             | 是否生效 | 说明                                                                          |
+| -------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| 编辑器                           | ✅       | 普通编辑、diff、Notebook 单元格                                               |
+| 终端 / 调试控制台                | 部分     | 这两处的字体是单独的配置项. 把它们的字体族写成和编辑器第一个族一样即可 (见下) |
+| Markdown Preview Enhanced 的预览 | ✅       | 需要满足两个前提: 装了 MPE, 且它的 `font-family` 第一个族和编辑器相同         |
+| 其它预览 / 扩展面板 (Draw.io 等) | ❌       | 独立文档, 用不到; 这类地方的 emoji 会直接落到 Noto Color Emoji, 彩色但偏宽    |
 
 终端与调试控制台补齐写法:
 
@@ -44,6 +47,8 @@
 | `Emoji Patch: 失效` | 全部还原, 同样在提示里点"重新加载窗口"                                             |
 
 两个命令都在命令面板 (`Ctrl+Shift+P`) 里搜 `Emoji Patch`.
+
+预览注入不需要提权, 但同样受这两个命令开关控制; 重载窗口后也会自动恢复到当前状态. 已经开着的预览要**重新打开**才会吃到 (预览只在创建时读一次 HTML).
 
 ## 上手 (拿到项目之后)
 
@@ -85,7 +90,7 @@ code --install-extension emoji-patch-*.vsix --force   # 装 (已经装过就覆�
 ```bash
 aubr build    # 编译一次 (tsc -> out/)
 aubr watch    # 改代码时持续编译
-aubr test     # 24 项无依赖测试 (含端到端)
+aubr test     # 31 项无依赖测试 (含端到端)
 aubr lint     # oxlint (整仓)
 aubr format   # oxfmt (整仓, 含本文件与 DESIGN.md)
 aubr check    # tsc --noEmit + oxlint

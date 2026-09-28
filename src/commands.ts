@@ -6,8 +6,9 @@ import { buildCssBlock } from './cssBlock';
 import { writeAsRoot, type PrivilegedWrite } from './elevate';
 import { hijackTableFormatter, type HijackResult } from './hijack';
 import { resolveOxfmt } from './oxfmtPath';
+import { installPreviewPatch, uninstallPreviewPatch, type PreviewResult } from './preview';
 import { buildUnicodeRange, extractRangeFromHtml, fetchEmojiSequences } from './range';
-import { hasBlock, injectBlock, sha256Base64, stripBlock, updateChecksum } from './workbench';
+import { extractBlock, hasBlock, injectBlock, sha256Base64, stripBlock, updateChecksum } from './workbench';
 
 function conf<T>(key: string): T {
   return vscode.workspace.getConfiguration('emojiPatch').get<T>(key) as T;
@@ -112,9 +113,45 @@ export function setupTableHijack(): HijackResult | undefined {
   return hijackTableFormatter(ext.extensionPath, oxfmt);
 }
 
-async function afterWrite(message: string): Promise<void> {
+/**
+ * 内存包装: 拦住 webview 的 html 赋值, 给 MPE 预览注入同一份字体块 (不落盘).
+ * 字体块直接从当前的 workbench.html 里取, 所以预览跟编辑器永远一致, 也不需要联网重算 range.
+ */
+export function setupPreviewPatch(): PreviewResult | undefined {
+  if (!conf<boolean>('patchPreview')) {
+    return undefined;
+  }
+  let inner: string | undefined;
+  try {
+    inner = extractBlock(readFileSync(join(conf<string>('codeRoot'), WORKBENCH_REL), 'utf8'));
+  } catch {
+    inner = undefined;
+  }
+  if (!inner) {
+    return { installed: false, message: 'workbench 未注入' };
+  }
+  return installPreviewPatch(inner);
+}
+
+/** 跑一条内存包装的状态文案. */
+function describeHijack(): string {
   const hijack = setupTableHijack();
-  const tail = hijack ? `\n表格格式化: ${hijack.wrapped ? '已走 oxfmt' : `未生效 (${hijack.message})`}` : '';
+  if (!hijack) {
+    return '未启用';
+  }
+  return hijack.wrapped ? 'oxfmt' : `未生效 (${hijack.message})`;
+}
+
+function describePreview(): string {
+  const preview = setupPreviewPatch();
+  if (!preview) {
+    return '未启用';
+  }
+  return preview.installed ? '已注入' : `未注入 (${preview.message})`;
+}
+
+async function afterWrite(message: string): Promise<void> {
+  const tail = `\n表格格式化: ${describeHijack()}\n预览: ${describePreview()}`;
   const pick = await vscode.window.showInformationMessage(`${message}${tail}`, '重新加载窗口');
   if (pick === '重新加载窗口') {
     await vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -149,6 +186,7 @@ export async function disable(): Promise<void> {
   try {
     const plan = computeDisable();
     if (!plan) {
+      uninstallPreviewPatch();
       vscode.window.showInformationMessage('Emoji Patch 当前未生效, 无需变更.');
       return;
     }
@@ -163,6 +201,7 @@ export async function disable(): Promise<void> {
       }
       return;
     }
+    uninstallPreviewPatch();
     await afterWrite('Emoji Patch 已失效.');
   } catch (err) {
     vscode.window.showErrorMessage(`Emoji Patch 失效失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -179,7 +218,8 @@ export function describeState(): string {
     patched = false;
   }
   const hijack = setupTableHijack();
+  const preview = setupPreviewPatch();
   return `workbench: ${patched ? '已注入' : '未注入'}; 表格格式化: ${
     hijack ? (hijack.wrapped ? 'oxfmt' : `未生效 (${hijack.message})`) : '未启用'
-  }`;
+  }; 预览: ${preview ? (preview.installed ? '已注入' : `未注入 (${preview.message})`) : '未启用'}`;
 }

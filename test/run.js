@@ -252,6 +252,94 @@ async function main() {
     assert.equal(wb.stripBlock(sampleHtml), sampleHtml);
   });
 
+  // -------------------------------------------------------------- preview
+  section('preview.ts (假 vscode + 假 webview 类)');
+  class FakeWebview {
+    #html = '';
+    get html() {
+      return this.#html;
+    }
+    set html(value) {
+      this.#html = value;
+    }
+  }
+  const fakePanels = [];
+  const PREVIEW_STUB = {
+    ViewColumn: { Active: -1 },
+    window: {
+      createWebviewPanel: () => {
+        const panel = { disposed: false, webview: new FakeWebview() };
+        panel.dispose = () => {
+          panel.disposed = true;
+        };
+        fakePanels.push(panel);
+        return panel;
+      },
+    },
+  };
+  const previewHtml =
+    '<!doctype html>\n<html>\n<head>\n<meta id="crossnote-data" data-config="{}">\n</head>\n<body></body>\n</html>\n';
+  const loadPreview = (stub) => {
+    const p = path.join(OUT, 'preview.js');
+    delete require.cache[p];
+    const orig = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === 'vscode') {
+        return stub;
+      }
+      return orig.call(this, request, parent, isMain);
+    };
+    try {
+      return require(p);
+    } finally {
+      Module._load = orig;
+    }
+  };
+  const previewMod = loadPreview(PREVIEW_STUB);
+  await test('预览注入: 命中预览 shell 时插到 </head> 之前', () => {
+    const out = previewMod.injectPreviewCss(previewHtml, inner);
+    assert.ok(out);
+    assert.ok(out.includes('<style>'));
+    assert.ok(out.indexOf('@font-face') < out.indexOf('</head>'));
+  });
+  await test('预览注入: 非预览 HTML (含缺 </head> 的) 一律不碰', () => {
+    assert.equal(previewMod.injectPreviewCss(sampleHtml, inner), undefined);
+    assert.equal(previewMod.injectPreviewCss('crossnote-data 但没有 head', inner), undefined);
+  });
+  await test('预览注入: 已含同一份块时不重复插', () => {
+    const once = previewMod.injectPreviewCss(previewHtml, inner);
+    assert.equal(previewMod.injectPreviewCss(once, inner), undefined);
+  });
+  await test('预览劫持: 装上后赋值预览 HTML 会被注入, 借的面板立刻 dispose', () => {
+    const r = previewMod.installPreviewPatch(inner);
+    assert.equal(r.installed, true);
+    assert.equal(fakePanels.length, 1);
+    assert.equal(fakePanels[0].disposed, true);
+    const wv = new FakeWebview();
+    wv.html = previewHtml;
+    assert.ok(wv.html.includes('@font-face'));
+    assert.equal(previewMod.isPreviewPatched(), true);
+  });
+  await test('预览劫持: 其它 webview 原样通过', () => {
+    const wv = new FakeWebview();
+    const plain = '<html><head></head><body>x</body></html>';
+    wv.html = plain;
+    assert.equal(wv.html, plain);
+  });
+  await test('预览劫持: 重复安装是 no-op (不再借面板)', () => {
+    const r = previewMod.installPreviewPatch(inner);
+    assert.equal(r.installed, true);
+    assert.equal(fakePanels.length, 1);
+  });
+  await test('预览劫持: 卸载后恢复原样, 重复卸载返回 false', () => {
+    assert.equal(previewMod.uninstallPreviewPatch(), true);
+    assert.equal(previewMod.isPreviewPatched(), false);
+    const wv = new FakeWebview();
+    wv.html = previewHtml;
+    assert.ok(!wv.html.includes('@font-face'));
+    assert.equal(previewMod.uninstallPreviewPatch(), false);
+  });
+
   // -------------------------------------------------------------- checksum
   section('checksum');
   const realHtml = readFileSync(WORKBENCH);

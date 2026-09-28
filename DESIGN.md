@@ -36,6 +36,7 @@ Iosevka Term 自带 `✅❌` 字形, 所以显示为单色窄体; Chromium 没�
 | 3   | 升级后重新生效              | VSCode 升级后, 一条命令恢复 patch                               |
 | 4   | 更新 `unicode-range`        | 不升级 VSCode 也能刷新 emoji 码点集合                           |
 | 5   | 劫持 markdowntable 的格式化 | 该插件所有会重排表格的操作都改走 oxfmt                          |
+| 6   | 预览也生效                  | Markdown Preview Enhanced 的预览里, emoji 同样彩色且恰好 2 格   |
 
 ## 约束
 
@@ -279,16 +280,28 @@ if (!helper.__emojiPatchWrapped) {
 
 必须用 `spawnSync`: `toFormatTableStr` 是同步函数, 且其返回值被同步用于计算光标位置. 下游会重新解析 oxfmt 的结果, 光标不受影响.
 
+## D. 预览注入: 内存劫持 webview 的 html
+
+Markdown Preview Enhanced (MPE) 的预览是独立 webview 文档, workbench 里那份 CSS 进不去. 但它也不需要提权 —— 可以纯内存拦:
+
+- MPE 在扩展宿主里把预览 HTML 拼好, 整段赋给 `panel.webview.html`: 头部带 `<meta id="crossnote-data">`, 里面已经嵌了 `style.less` 的 CSS 与 `head.html` 的内容.
+- 预览正文由 webview 端用 `innerHTML` 渲染进**同一个** document, 所以往这段 HTML 的 `</head>` 里插一个 `<style>` 就能生效 —— `style.less` 走的正是这条通道.
+- 所以: 换掉 webview 类**原型**上的 `html` 访问器, 赋值时命中预览 shell 就顺手插一份 `@font-face` 块. 块的内容直接从当前 `workbench.html` 的标记块里取, 与编辑器永远一致 (即两者用的是同一个字体族名).
+- 原型怎么拿: `createWebviewPanel` 建一个空面板 → 取 `webview` 的原型 → 立刻 `dispose()`. API 没有暴露 webview 类, 别的扩展的 webview 也拿不到, 只能借一下.
+
+原型级包装与激活顺序无关: 只要早于"下一次给 webview 赋 HTML"即可 (为什么不能走更正规的 `registerCustomEditorProvider`, 见 [方案选用的考虑](#为什么不包装-registercustomeditorprovider)).
+
 ---
 
 # 适用范围
 
-| 区域         | 是否生效 | 说明                                                                                       |
-| ------------ | -------- | ------------------------------------------------------------------------------------------ |
-| 编辑器       | ✅       | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                              |
-| 终端         | 部分     | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
-| 调试控制台   | 部分     | 走 `debug.console.fontFamily`, 同上                                                        |
-| 独立 webview | ❌       | Markdown 预览 / Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到它     |
+| 区域                 | 是否生效 | 说明                                                                                       |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| 编辑器               | ✅       | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                              |
+| 终端                 | 部分     | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
+| 调试控制台           | 部分     | 走 `debug.console.fontFamily`, 同上                                                        |
+| MPE 的 Markdown 预览 | ✅       | 走预览注入 (见下), 同样要求字体链的第一个族与编辑器一致                                    |
+| 其它 webview         | ❌       | Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到                       |
 
 终端与调试控制台补齐写法 (关键是**族名一致**, 不再需要 `'EmojiPatch'`):
 
@@ -297,7 +310,9 @@ if (!helper.__emojiPatchWrapped) {
 "debug.console.fontFamily": "'Iosevka Term', monospace",
 ```
 
-> webview 里的 emoji 会直接落到 `Noto Color Emoji`, 是彩色但 ~2.5 格, 不经 `size-adjust`; 这是独立文档的固有限制.
+> 没被注入的 webview (含其它预览插件) 里的 emoji 会直接落到 `Noto Color Emoji`, 是彩色但 ~2.5 格, 不经 `size-adjust`; 这是独立文档的固有限制.
+>
+> MPE 预览里唯一需要配合的是它自己的字体链: `style.less` 里 `font-family` 的第一个族要和编辑器一致 (本机已统一为 `'Iosevka Term', 'MiSans', …`). 注入的 `@font-face` 顶替的就是那个名字, 对不上就只是不生效, 不会变丑.
 
 ---
 
@@ -406,6 +421,14 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 
 结论: **不补**. 逐字符的候选清单与实测数据留在 `software-config` 的 `.temp/vscode-emoji-sample.md` (A/B/C/D 四组), 以后想改可以按同一套数据重新决定.
 
+## 为什么预览注入不写 `style.less` / `head.html`
+
+`~/.config/crossnote/` 下那 4 个文件 (含 `style.less`) 都是指向 dotfiles 仓库的符号链接. 往里写"patch 生成的块"等于把机器相关的内容塞进版本库, 而且 MPE 升级、换机器时还得再同步一次 —— 和 [约束](#约束) 里"不改 dotfiles"的取向一致, 所以宁可走内存劫持 (代价见下一条).
+
+## 为什么不包装 `registerCustomEditorProvider`
+
+这是更"正规"的入口: 能直接拿到 MPE 的 provider, 在 `resolveCustomEditor` 里包装它给的 panel, 不用借临时面板. 但实测**抢不到**: 扩展宿主起来后 MPE 在 ~0.9s 前就注册完了 provider, 而任何激活事件 (`onStartupFinished` / `onLanguage:markdown`) 都晚于它; 一旦错过, 这个窗口里所有预览都不会被包装. 所以改用原型级的 `html` 访问器, 与激活顺序无关.
+
 ---
 
 # 插件结构
@@ -429,10 +452,11 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 | `emojiPatch.sizeAdjust`         | `80.3%`                         | 缩放, 保证 emoji 恰好 2 格                            |
 | `emojiPatch.oxfmtPath`          | `""`                            | oxfmt 可执行文件路径; 空则自动探测                    |
 | `emojiPatch.patchMarkdownTable` | `true`                          | 是否包装 markdowntable                                |
+| `emojiPatch.patchPreview`       | `true`                          | 是否给 MPE 预览注入同一份字体块 (仅内存)              |
 
 ## 激活时机
 
-`onStartupFinished`. 要保证在 markdowntable 被使用前完成包装 (内存包装与加载顺序无关, 但越早越稳).
+`onStartupFinished` (外加 `onLanguage:markdown`). 两条内存包装 (表格格式化 / 预览注入) 在激活时就装好; 预览注入额外要求 `workbench.html` 里已有标记块 (即"已生效"), 这样"失效"之后重载窗口就真的什么都不剩.
 
 ## 目录结构
 
@@ -455,8 +479,9 @@ vscode-emoji-patch/
 │   ├── elevate.ts               # 临时目录 + 只做 cp 的脚本 + pkexec
 │   ├── oxfmtPath.ts             # oxfmt 路径探测
 │   ├── hijack.ts                # 内存包装 markdowntable 的 toFormatTableStr
+│   ├── preview.ts               # 内存包装 webview 的 html, 给 MPE 预览注入字体块
 │   └── commands.ts              # 生效 / 失效 两个命令
-├── test/run.js                  # 无依赖测试 (24 项, 含端到端)
+├── test/run.js                  # 无依赖测试 (31 项, 含端到端)
 └── out/                         # 构建产物
 ```
 
@@ -492,6 +517,13 @@ text.replace(re, `$1${newChecksum}$2`);
 ### 包装的幂等
 
 用模块上的标记 (`helper.__emojiPatchWrapped`) 防止重复包装. 包装函数闭包缓存 `orig`.
+
+### 预览注入的细节
+
+- 字体块内容用 `extractBlock()` 从当前 `workbench.html` 的标记块里取: 预览与编辑器必然是同一份, 也不需要联网重算 range.
+- 只碰带 `<meta id="crossnote-data">` 的 HTML, 其它 webview 原样通过; 已含同一份块时不再重复插.
+- 安装时借一个临时面板取原型并立刻 `dispose()`; 卸载时把原访问器原样装回 (`失效` 命令会调).
+- 已经渲染出来的预览不会变 —— 预览面板只在创建/重建时赋 HTML, 所以要让某个已开的预览恢复/生效, 重新打开它.
 
 ---
 
@@ -580,6 +612,9 @@ oxlint = "latest"
 | 系统字体 / fontconfig                    | 不新增字体文件, 只 `@font-face` 引用现有 Noto                                              |
 | `globalStorage` / `~/.cache/emoji-patch` | 不使用, 无持久数据目录                                                                     |
 | dotfiles 仓库其它文件                    | —                                                                                          |
+| `~/.config/crossnote/` (→ dotfiles)      | 不写: 预览注入只在内存里拦 webview 的 `html` 赋值                                          |
+| MPE 扩展的文件                           | 不改 (`crossnote/**` 一字节不动)                                                           |
+| 另外的 webview / 扩展面板                | 只读判断, 不匹配就不动                                                                     |
 
 ## 生命周期
 
@@ -588,6 +623,7 @@ oxlint = "latest"
 | VSCode / pacman 升级 | `workbench.html` / `product.json` 被覆盖 → patch 痕迹**自动清零**, 跑一次"生效"恢复 (`settings.json` 不受影响) |
 | `Emoji Patch: 失效`  | 删标记块并还原 checksum → 回到出厂状态                                                                         |
 | 卸载扩展             | 删 `~/.vscode/extensions/lhs-12.emoji-patch-*` → 无残留                                                        |
+| 重载窗口             | 内存包装 (表格格式化 / 预览注入) 随扩展宿主重建而消失, 重新激活时再装上                                        |
 | 每日常态             | 除 2 个安装文件的内容差异外零额外痕迹; 无后台进程                                                              |
 
 ---
@@ -597,7 +633,8 @@ oxlint = "latest"
 ## 确认是否生效
 
 - 看 `✅❌` 是否变彩色; 或在 `Toggle Developer Tools` 里选中 `.monaco-editor` 看 computed `font-family`.
-- 跑一次 `Emoji Patch: 生效`: 通知里会报出顶替的族名和码点数, 已生效时提示"无需变更"; 表格包装状态也在这条通知里.
+- 跑一次 `Emoji Patch: 生效`: 通知里会报出顶替的族名和码点数, 已生效时提示"无需变更"; 表格包装与预览注入状态也在这条通知里.
+- 预览: 在 MPE 预览里右键 → `Inspect Element`, 看 `head` 里有没有注入的那段 `@font-face` (或重开预览后看 emoji 是否变彩色且与中文等宽).
 - 确认扩展已激活: `~/.config/Code/logs/*/window*/exthost/exthost.log` 里有 `ExtensionService#_doActivateExtension lhs-12.emoji-patch` 一行.
 
 ## 常见失败
@@ -619,13 +656,15 @@ oxlint = "latest"
 
 # 风险与遗留
 
-| 项                                    | 说明                                                                                            | 处理                                           |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| markdowntable 内部结构变化            | require 路径或函数名变化                                                                        | try/catch + 命令结果里提示                     |
-| pkexec 在扩展宿主的弹窗               | 无 TTY, 依赖 polkit agent                                                                       | 失败时给出脚本路径手动执行                     |
-| VSCode 升级后 `product.json` 结构变化 | checksum key 位置                                                                               | 找不到 key 时报错并保留临时脚本                |
-| Unicode 发布新 emoji                  | range 会自动包含新码点, 但 `test/run.js` 里两个数是刻意的 tripwire (码点数 1243 / 被排除数 204) | 更新期望值, 并同步本文档 (附录列表与 204 那句) |
-| 非 ASCII 路径 / 编码                  | `workbench.html` 读写                                                                           | 按 UTF-8 字节处理, 不做编码转换                |
+| 项                                    | 说明                                                                                            | 处理                                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| markdowntable 内部结构变化            | require 路径或函数名变化                                                                        | try/catch + 命令结果里提示                                                              |
+| pkexec 在扩展宿主的弹窗               | 无 TTY, 依赖 polkit agent                                                                       | 失败时给出脚本路径手动执行                                                              |
+| VSCode 升级后 `product.json` 结构变化 | checksum key 位置                                                                               | 找不到 key 时报错并保留临时脚本                                                         |
+| Unicode 发布新 emoji                  | range 会自动包含新码点, 但 `test/run.js` 里两个数是刻意的 tripwire (码点数 1243 / 被排除数 204) | 更新期望值, 并同步本文档 (附录列表与 204 那句)                                          |
+| 非 ASCII 路径 / 编码                  | `workbench.html` 读写                                                                           | 按 UTF-8 字节处理, 不做编码转换                                                         |
+| 预览注入依赖 webview 内部类           | 原型上的 `html` 访问器属未公开实现, VSCode 升级后可能改名或改结构                               | 安装失败只在通知里提示, 不影响编辑器; 兜底是重开预览 / 不启用 `emojiPatch.patchPreview` |
+| 已打开的预览不追溯                    | 赋值发生在面板创建/重建时                                                                       | 重开该预览即可; 文档已写明                                                              |
 
 # 里程碑
 
@@ -636,6 +675,7 @@ oxlint = "latest"
 | 3   | 按族名顶替法生成 CSS 块, 注入后 emoji 分流且普通文本不受影响              | ✅   |
 | 4   | `pkexec` 提权写入 + checksum 同步 + 幂等 (假 pkexec + 假 codeRoot 端到端) | ✅   |
 | 5   | 收尾: 移除 dotfiles 里 `'EmojiPatch', ` 前缀; 删除旧的 plan 文档          | ✅   |
+| 6   | 预览注入: 内存劫持 webview 的 `html`, MPE 预览与编辑器同一个字体族        | ✅   |
 
 已在真实 VSCode 上跑通全流程 (提权注入 → checksum 同步 → 重载窗口 → emoji 彩色且严格 2 格), 日常使用正常.
 

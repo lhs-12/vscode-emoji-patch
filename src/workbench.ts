@@ -37,6 +37,16 @@ export function injectBlock(html: string, inner: string): string {
   return `${html.slice(0, lineStart)}${indent}<style>\n${span}\n${indent}</style>\n${html.slice(lineStart)}`;
 }
 
+/** 取出标记之间的 CSS 内容 (预览注入要用同一份). */
+export function extractBlock(html: string): string | undefined {
+  const start = html.indexOf(MARKER_START);
+  const end = html.indexOf(MARKER_END);
+  if (start < 0 || end <= start) {
+    return undefined;
+  }
+  return html.slice(start + MARKER_START.length, end).trim();
+}
+
 /** 去掉注入块与早期手工块, 能逐字节还原. */
 export function stripBlock(html: string): string {
   let out = html.replace(WRAP_RE, '');
