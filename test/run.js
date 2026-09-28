@@ -1,0 +1,440 @@
+'use strict';
+/**
+ * 无依赖测试: node test/run.js
+ * 覆盖所有不依赖 VS Code 运行时的核心逻辑.
+ */
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const { readFileSync, existsSync } = require('node:fs');
+const Module = require('node:module');
+const path = require('node:path');
+
+const ROOT = path.join(__dirname, '..');
+const OUT = path.join(ROOT, 'out');
+const CODE_ROOT = '/usr/share/code/resources/app';
+const WORKBENCH = path.join(CODE_ROOT, 'out/vs/code/electron-browser/workbench/workbench.html');
+const PRODUCT = path.join(CODE_ROOT, 'product.json');
+const PLAN_DOC = '/home/hans/software-config/.temp/vscode-emoji-font-plan.md';
+const MDT_EXT = '/home/hans/.vscode/extensions/takumii.markdowntable-0.13.0';
+
+const range = require(path.join(OUT, 'range.js'));
+const cssBlock = require(path.join(OUT, 'cssBlock.js'));
+const wb = require(path.join(OUT, 'workbench.js'));
+const oxfmtPath = require(path.join(OUT, 'oxfmtPath.js'));
+const hijack = require(path.join(OUT, 'hijack.js'));
+const consts = require(path.join(OUT, 'const.js'));
+
+let passed = 0;
+let failed = 0;
+function test(name, fn) {
+  try {
+    const r = fn();
+    if (r instanceof Promise) {
+      return r.then(
+        () => ok(name),
+        (e) => ko(name, e),
+      );
+    }
+    ok(name);
+  } catch (e) {
+    ko(name, e);
+  }
+  return undefined;
+}
+function ok(name) {
+  passed++;
+  console.log(`  \u2713 ${name}`);
+}
+function ko(name, e) {
+  failed++;
+  console.log(`  \u2717 ${name}\n      ${e && e.message ? e.message.split('\n').join('\n      ') : e}`);
+}
+function section(t) {
+  console.log(`\n${t}`);
+}
+
+async function main() {
+  // ---------------------------------------------------------------- range
+  section('range.ts');
+  const seq = await range.fetchEmojiSequences();
+  assert.ok(seq.length > 10000, 'emoji-sequences.txt 内容过短');
+  const built = range.buildUnicodeRange(seq);
+  const setOf = (rangeStr) => {
+    const s = new Set();
+    for (const t of rangeStr
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)) {
+      if (t.includes('-')) {
+        const [a, b] = t.slice(2).split('-');
+        for (let c = parseInt(a, 16); c <= parseInt(b, 16); c++) s.add(c);
+      } else {
+        s.add(parseInt(t.slice(2), 16));
+      }
+    }
+    return s;
+  };
+  const cps = setOf(built.range);
+  await test(`生成 range: ${built.count} 个码点 / ${built.range.split(',').length} 段 (相邻已合并)`, () => {
+    assert.equal(built.count, 1243);
+    assert.equal(cps.size, built.count, '段展开后码点数应与 count 一致');
+  });
+
+  if (existsSync(PLAN_DOC)) {
+    const doc = readFileSync(PLAN_DOC, 'utf8');
+    const m = /unicode-range:\s*([\s\S]*?);/.exec(doc);
+    const docSet = setOf(m[1]);
+    await test('码点集合与 plan 文档里的 range 完全一致', () => {
+      assert.deepEqual(
+        [...cps].sort((a, b) => a - b),
+        [...docSet].sort((a, b) => a - b),
+      );
+    });
+  } else {
+    console.log('  - 跳过 plan 文档对比 (不存在)');
+  }
+
+  await test('6 个 CJK 全角都在 range 内', () => {
+    for (const c of [0x3030, 0x303d, 0x3297, 0x3299, 0x1f202, 0x1f237]) {
+      assert.ok(cps.has(c), `U+${c.toString(16).toUpperCase()} 缺失`);
+    }
+  });
+  await test('含 U+2705 / U+274C / U+1F1E6-1F1FF', () => {
+    assert.ok(cps.has(0x2705) && cps.has(0x274c));
+    assert.ok(cps.has(0x1f1e6) && cps.has(0x1f1ff));
+  });
+  await test('不含 EP=No 的 U+1F3D4 (🏔)', () => {
+    assert.ok(!cps.has(0x1f3d4));
+  });
+  await test('extractRangeFromHtml 能读回 range', () => {
+    const html = `<style>@font-face { unicode-range: ${built.range}; }</style>`;
+    assert.equal(range.extractRangeFromHtml(html), built.range);
+  });
+
+  // -------------------------------------------------------------- cssBlock
+  section('cssBlock.ts');
+  const inner = cssBlock.buildCssBlock({
+    codeFont: 'Iosevka Term',
+    notoFamily: 'Noto Color Emoji',
+    sizeAdjust: '80.3%',
+    unicodeRange: 'U+2705, U+274C',
+  });
+  await test('先交还本地族, 后覆盖 emoji (顺序敏感)', () => {
+    const lines = inner.split('\n');
+    assert.match(lines[0], /font-family: "Iosevka Term"; src: local\("Iosevka Term"\)/);
+    assert.match(lines[1], /src: local\("Noto Color Emoji"\)/);
+    assert.match(lines[1], /size-adjust: 80\.3%/);
+    assert.match(lines[1], /unicode-range: U\+2705, U\+274C;/);
+  });
+
+  // ------------------------------------------------------------- workbench
+  section('workbench.ts');
+  const sampleHtml =
+    '<!doctype html>\n<html>\n  <head>\n    <style>body{}</style>\n  </head>\n  <body></body>\n</html>\n';
+  const injected = wb.injectBlock(sampleHtml, inner);
+  await test('注入: 标记存在且在 </head> 之前', () => {
+    assert.ok(wb.hasBlock(injected));
+    assert.ok(injected.indexOf(consts.MARKER_START) < injected.indexOf('</head>'));
+    assert.ok(injected.includes('@font-face'));
+  });
+  await test('注入幂等: 再注入一次结果不变', () => {
+    assert.equal(wb.injectBlock(injected, inner), injected);
+  });
+  await test('注入幂等: 换内容只替换标记之间', () => {
+    const other = inner.replace('U+2705, U+274C', 'U+1F600');
+    const again = wb.injectBlock(injected, other);
+    assert.ok(again.includes('U+1F600'));
+    assert.equal(again.split(consts.MARKER_START).length, 2);
+    assert.equal(again.split(consts.MARKER_END).length, 2);
+    assert.ok(!again.includes('U+2705, U+274C'));
+  });
+  await test('stripBlock: 完全还原', () => {
+    assert.equal(wb.stripBlock(injected), sampleHtml);
+  });
+  const legacy = sampleHtml.replace(
+    '  </head>',
+    '    <style>\n      @font-face {\n        font-family: "EmojiPatch";\n        src: local("Noto Color Emoji");\n        size-adjust: 80.3%;\n        unicode-range: U+2705;\n      }\n    </style>\n  </head>',
+  );
+  await test('stripBlock: 能清掉早期手工 EmojiPatch 块', () => {
+    const out = wb.stripBlock(legacy);
+    assert.ok(!out.includes('EmojiPatch'));
+    assert.ok(!out.includes('@font-face'));
+  });
+  await test('stripBlock: 无标记时原样返回', () => {
+    assert.equal(wb.stripBlock(sampleHtml), sampleHtml);
+  });
+
+  // -------------------------------------------------------------- checksum
+  section('checksum');
+  const realHtml = readFileSync(WORKBENCH);
+  const realSum = wb.sha256Base64(realHtml);
+  const productJson = readFileSync(PRODUCT, 'utf8');
+  const productKey = /"vs\/code\/electron-browser\/workbench\/workbench\.html"\s*:\s*"([^"]*)"/.exec(productJson)[1];
+  await test('sha256 算法与 product.json 里现有值一致', () => {
+    assert.equal(realSum, productKey);
+  });
+  await test('updateChecksum 只改那一个值', () => {
+    const changed = wb.updateChecksum(productJson, 'TESTVALUE');
+    assert.match(changed, /"vs\/code\/electron-browser\/workbench\/workbench\.html"\s*:\s*"TESTVALUE"/);
+    assert.equal(changed.length, productJson.length + 'TESTVALUE'.length - productKey.length);
+    const restored = wb.updateChecksum(changed, productKey);
+    assert.equal(restored, productJson, '改回来应与原文完全一致');
+  });
+  await test('整链路: 注入 -> 算 checksum -> 改 product.json -> 可读回', () => {
+    const patched = wb.injectBlock(realHtml.toString('utf8'), inner);
+    const buf = Buffer.from(patched, 'utf8');
+    const sum = wb.sha256Base64(buf);
+    const next = wb.updateChecksum(productJson, sum);
+    const back = /"vs\/code\/electron-browser\/workbench\/workbench\.html"\s*:\s*"([^"]*)"/.exec(next)[1];
+    assert.equal(back, sum);
+    assert.notEqual(sum, realSum);
+    assert.equal(
+      wb.stripBlock(patched),
+      wb.stripBlock(realHtml.toString('utf8')),
+      'strip 后应与去掉旧块的原文件逐字一致',
+    );
+  });
+
+  // ---------------------------------------------------------------- oxfmt
+  section('oxfmtPath.ts');
+  const oxfmt = oxfmtPath.resolveOxfmt('');
+  await test('能自动探测到 oxfmt', () => {
+    assert.ok(oxfmt, '未找到 oxfmt');
+    assert.ok(existsSync(oxfmt));
+  });
+
+  // ---------------------------------------------------------------- hijack
+  section('hijack.ts (用真实 markdowntable 模块)');
+  if (!existsSync(MDT_EXT)) {
+    console.log('  - 跳过 (未安装 markdowntable)');
+  } else {
+    await test('包装后输出 == oxfmt 输出', () => {
+      // 1) 用 stub 的 vscode 直接加载真实模块 (与扩展宿主同款手法)
+      const stub = {
+        workspace: {
+          getConfiguration: () => ({
+            get: (k) =>
+              ({
+                alignData: true,
+                alignColumnHeader: true,
+                paddedDelimiterRowPipes: true,
+                ignoreCodeblock: true,
+              })[k.split('.').pop()],
+          }),
+        },
+      };
+      const origLoad = Module._load;
+      Module._load = function (request, parent, isMain) {
+        if (request === 'vscode') {
+          return stub;
+        }
+        return origLoad.call(this, request, parent, isMain);
+      };
+      let helper;
+      try {
+        helper = require(path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js'));
+      } finally {
+        Module._load = origLoad;
+      }
+      const table = [
+        '| 名称 | 状态 | 说明 |',
+        '| --- | --- | --- |',
+        '| 中文 | ✅ | 一行 |',
+        '| emoji | ❌ | 两格 |',
+        '| code | `a|b` | x |',
+      ].join('\n');
+      const data = helper.stringToTableData(table);
+      const before = helper.toFormatTableStr(data);
+      const want = spawnSync(oxfmt, ['--stdin-filepath', 'table.md'], {
+        input: before,
+        encoding: 'utf8',
+      });
+      assert.equal(want.status, 0, want.stderr);
+
+      const res = hijack.hijackTableFormatter(MDT_EXT, oxfmt);
+      assert.equal(res.wrapped, true, res.message);
+      const after = helper.toFormatTableStr(data);
+      assert.equal(after, want.stdout.replace(/[\r\n]+$/, ''));
+      assert.ok(!after.endsWith('\n'), '不应带尾部换行');
+      // 再包装一次应幂等
+      assert.equal(hijack.hijackTableFormatter(MDT_EXT, oxfmt).message, '已包装');
+      assert.equal(helper.toFormatTableStr(data), after);
+      // 对齐: ✅ 按 2 格对齐, 中文按 2 格
+      const lines = after.split('\n');
+      assert.ok(lines[1].includes('| ---'), 'delimiter 行存在');
+      assert.equal(lines.length, 5, `行数应为 5, 实际 ${lines.length}`);
+    });
+    await test('oxfmt 找不到时退回原样', () => {
+      const origLoad = Module._load;
+      Module._load = function (request, parent, isMain) {
+        if (request === 'vscode') {
+          return {
+            workspace: {
+              getConfiguration: () => ({
+                get: (k) =>
+                  ({
+                    alignData: true,
+                    alignColumnHeader: true,
+                    paddedDelimiterRowPipes: true,
+                    ignoreCodeblock: true,
+                  })[k.split('.').pop()],
+              }),
+            },
+          };
+        }
+        return origLoad.call(this, request, parent, isMain);
+      };
+      let helper2;
+      try {
+        delete require.cache[path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js')];
+        helper2 = require(path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js'));
+      } finally {
+        Module._load = origLoad;
+      }
+      const data = helper2.stringToTableData('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
+      // 用一个不存在的 oxfmt 路径包装 -> 必须退回 orig
+      const res = hijack.hijackTableFormatter(MDT_EXT, '/nonexistent/oxfmt');
+      assert.equal(res.wrapped, true);
+      const got = helper2.toFormatTableStr(data);
+      assert.ok(typeof got === 'string' && got.includes('| a'), '应返回 markdowntable 原始结果');
+    });
+  }
+
+  // ---------------------------------------------------------------- elevate
+  section('elevate.ts');
+  const elevate = require(path.join(OUT, 'elevate.js'));
+  await test('preparePrivilegedDir: 临时目录 + 脚本内容正确 (不提权)', () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const p = elevate.preparePrivilegedDir([
+      { dest: '/usr/share/code/x.txt', content: Buffer.from('hello') },
+      { dest: '/usr/share/code/product.json', content: Buffer.from('{}') },
+    ]);
+    try {
+      assert.ok(path.resolve(p.dir).startsWith(path.resolve(os.tmpdir())), '临时目录应在 /tmp 下');
+      const script = fs.readFileSync(p.scriptPath, 'utf8');
+      const lines = script.trim().split('\n');
+      assert.equal(lines[0], '#!/bin/bash');
+      assert.equal(lines[1], 'set -euo pipefail');
+      assert.equal(lines.length, 4, '应有 2 条 cp');
+      assert.ok(script.includes('/usr/share/code/x.txt'));
+      assert.ok(script.includes('/usr/share/code/product.json'));
+      assert.ok(!script.includes('~'), 'pkexec 会清洗环境, 不能出现 ~');
+      const src = path.join(p.dir, '_usr_share_code_x.txt');
+      assert.equal(fs.readFileSync(src, 'utf8'), 'hello');
+      assert.equal(fs.statSync(p.scriptPath).mode & 0o777, 0o755);
+    } finally {
+      fs.rmSync(p.dir, { recursive: true, force: true });
+    }
+    assert.ok(!fs.existsSync(p.dir), '清理后临时目录应消失');
+  });
+
+  // ------------------------------------------------- 端到端 (假 pkexec)
+  section('commands.ts (端到端: 假 pkexec + 假 codeRoot)');
+  await test('enable -> 注入+同步 checksum+幂等; disable -> 逐字节还原', async () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const wbMod = require(path.join(OUT, 'workbench.js'));
+
+    // 假 codeRoot: 拿真实文件当样本
+    const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'emoji-patch-root-'));
+    const relDir = 'out/vs/code/electron-browser/workbench';
+    fs.mkdirSync(path.join(fakeRoot, relDir), { recursive: true });
+    fs.copyFileSync(WORKBENCH, path.join(fakeRoot, relDir, 'workbench.html'));
+    fs.copyFileSync(PRODUCT, path.join(fakeRoot, 'product.json'));
+    const wbPath = path.join(fakeRoot, relDir, 'workbench.html');
+    const prodPath = path.join(fakeRoot, 'product.json');
+    const origWb = wbMod.stripBlock(fs.readFileSync(wbPath, 'utf8'));
+
+    // 假 pkexec: 忽略提权, 直接 bash 脚本
+    const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'emoji-patch-bin-'));
+    fs.writeFileSync(path.join(fakeBin, 'pkexec'), '#!/bin/sh\n/bin/bash "$2"\n', { mode: 0o755 });
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${oldPath}`;
+
+    const settings = {
+      codeRoot: fakeRoot,
+      codeFont: '',
+      notoFamily: 'Noto Color Emoji',
+      sizeAdjust: '80.3%',
+      oxfmtPath: '',
+      patchMarkdownTable: false,
+    };
+    const stub = {
+      workspace: {
+        getConfiguration: (sec) => ({
+          get: (k) => (sec === 'editor' ? "'EmojiPatch', 'IsoFont', 'MiSans'" : settings[k]),
+        }),
+      },
+      window: {
+        showInformationMessage: async () => undefined,
+        showErrorMessage: async () => undefined,
+      },
+      commands: { executeCommand: async () => undefined },
+      extensions: { getExtension: () => undefined },
+      env: { clipboard: { writeText: async () => undefined } },
+    };
+    const origLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === 'vscode') {
+        return stub;
+      }
+      return origLoad.call(this, request, parent, isMain);
+    };
+    let cmds;
+    try {
+      for (const f of ['commands.js', 'extension.js', 'hijack.js']) {
+        delete require.cache[path.join(OUT, f)];
+      }
+      cmds = require(path.join(OUT, 'commands.js'));
+    } finally {
+      Module._load = origLoad;
+    }
+
+    try {
+      await cmds.enable();
+      const after = fs.readFileSync(wbPath, 'utf8');
+      assert.ok(wbMod.hasBlock(after), '应已注入');
+      assert.ok(
+        after.includes('font-family: "IsoFont"; src: local("IsoFont")'),
+        '应跳过 EmojiPatch 顶替第一个真实字体族',
+      );
+      assert.ok(after.includes('font-family: "IsoFont"; src: local("Noto Color Emoji")'));
+      assert.ok(after.includes('size-adjust: 80.3%'));
+      assert.equal(after.split(consts.MARKER_START).length, 2, '只能有一个注入块');
+      assert.ok(!after.includes('EmojiPatch'), '旧的手工块应被清掉');
+      const expectSum = wbMod.sha256Base64(fs.readFileSync(wbPath));
+      assert.ok(fs.readFileSync(prodPath, 'utf8').includes(`"${expectSum}"`), 'checksum 应已同步');
+
+      // 幂等: 再跑一次不改文件
+      fs.writeFileSync(path.join(fakeBin, 'marker'), 'x');
+      const snapWb = fs.readFileSync(wbPath);
+      const snapProd = fs.readFileSync(prodPath);
+      await cmds.enable();
+      assert.ok(fs.readFileSync(wbPath).equals(snapWb), '重复 enable 不应改动 workbench.html');
+      assert.ok(fs.readFileSync(prodPath).equals(snapProd), '重复 enable 不应改动 product.json');
+
+      // disable
+      await cmds.disable();
+      const disabled = fs.readFileSync(wbPath, 'utf8');
+      assert.ok(!wbMod.hasBlock(disabled), '应已移除');
+      assert.equal(disabled, origWb, 'disable 后应与去掉旧块的原文件逐字节一致');
+      assert.ok(fs.readFileSync(prodPath, 'utf8').includes(`"${wbMod.sha256Base64(fs.readFileSync(wbPath))}"`));
+
+      // 再 disable 应 no-op
+      const snap2 = fs.readFileSync(wbPath);
+      await cmds.disable();
+      assert.ok(fs.readFileSync(wbPath).equals(snap2));
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(fakeRoot, { recursive: true, force: true });
+      fs.rmSync(fakeBin, { recursive: true, force: true });
+    }
+  });
+
+  section('结果');
+  console.log(`  通过 ${passed}, 失败 ${failed}`);
+  process.exit(failed === 0 ? 0 : 1);
+}
+
+main();

@@ -1,0 +1,15 @@
+{
+  "plugins": [],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "env": {
+    "node": true,
+    "es2024": true
+  },
+  "rules": {
+    "no-underscore-dangle": "off"
+  }
+}

@@ -1,0 +1,13 @@
+aube-lock.yaml
+DESIGN.md
+.gitignore
+**/*.map
+node_modules/**
+out/**/*.map
+.oxfmtrc.json
+.oxlintrc.json
+README.md
+src/**
+test/**
+tsconfig.json
+.vscode/**
