@@ -1,5 +1,6 @@
 aube-lock.yaml
 DESIGN.md
+mise.toml
 .gitignore
 **/*.map
 node_modules/**

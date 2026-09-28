@@ -20,7 +20,7 @@
     "package": "aube dlx @vscode/vsce package --allow-missing-repository"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3",
+    "@types/node": "^24",
     "@types/vscode": "1.138.0",
     "typescript": "^7.0.2"
   },

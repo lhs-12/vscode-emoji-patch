@@ -394,7 +394,9 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 vscode-emoji-patch/
 ├── DESIGN.md                    # 本文档
 ├── README.md
+├── mise.toml                    # 工具版本 (写法与全局一致, 直接复用已装版本)
 ├── package.json                 # 扩展清单 (id: lhs-12.emoji-patch)
+├── aube-lock.yaml               # aube lockfile
 ├── tsconfig.json
 ├── .oxlintrc.json / .oxfmtrc.json
 ├── .vscodeignore
@@ -451,21 +453,49 @@ text.replace(re, `$1${newChecksum}$2`);
 
 遵循 oxc / VoidZero 生态, 包管理用 aube.
 
-| 用途       | 选择          | 命令                                         |
-| ---------- | ------------- | -------------------------------------------- |
-| 包管理     | aube          | `aube add -D <pkg>` / `aube install`         |
-| 临时执行   | aubx          | `aubx @vscode/vsce package` (代替 npx)       |
-| 运行脚本   | aubr          | `aubr build` (代替 npm run)                  |
-| 语法检查   | oxlint        | `oxlint src test`                            |
-| 代码格式化 | oxfmt         | `oxfmt src test package.json tsconfig.json`  |
-| 编译       | tsc           | `tsc -p .`                                   |
-| 扩展打包   | @vscode/vsce  | `aubx @vscode/vsce package`                  |
-| 运行时依赖 | **0 个**      | 只用 Node 内置 + `vscode` API + spawn 外部 oxfmt |
+## mise.toml
 
-说明:
+项目自带 `mise.toml`, 只声明它真正用到的工具, 且版本写法与全局 `~/.config/mise/config.toml` **完全一致** —— mise 因此直接复用全局已装的版本, 不重复下载.
 
-- lockfile 为 `aube-lock.yaml`.
-- oxlint / oxfmt 由 **mise** 全局提供 (符合"开发工具用 mise"原则), 不进 devDependencies.
+```toml
+[tools]
+node   = "lts"      # v24: 跑 test, 也是 aube 的宿主
+oxfmt  = "latest"   # 兼具运行时依赖身份
+aube   = "latest"
+oxlint = "latest"
+```
+
+全局配置里与本项目无关的 (rust / java / maven / uv / ruff / stylua / gh / typst …) 不搬.
+
+## 一览
+
+| 用途       | 选择         | 来源            | 命令                                        |
+| ---------- | ------------ | --------------- | ------------------------------------------- |
+| Node       | node lts     | mise (全局复用) | `node`                                      |
+| 包管理     | aube         | mise (全局复用) | `aube add -D <pkg>` / `aube install`        |
+| 临时执行   | aubx         | aube            | `aubx @vscode/vsce package` (代替 npx)      |
+| 运行脚本   | aubr         | aube            | `aubr build` (代替 npm run)                 |
+| 语法检查   | oxlint       | mise (全局复用) | `oxlint src test`                           |
+| 代码格式化 | oxfmt        | mise (全局复用) | `oxfmt src test package.json tsconfig.json` |
+| 编译       | tsc          | devDependency   | `tsc -p .`                                  |
+| 扩展打包   | @vscode/vsce | aubx            | `aubx @vscode/vsce package`                 |
+| 运行时依赖 | **0 个**     | —               | 只用 Node 内置 + `vscode` API + spawn 外部 oxfmt |
+
+## devDependencies
+
+| 包              | 版本      | 说明                                                           |
+| --------------- | --------- | -------------------------------------------------------------- |
+| `@types/node`   | `^24`     | **必须与运行时 Node 同大版本** (见下)                          |
+| `@types/vscode` | `1.138.0` | 与 `engines.vscode` 对齐, 取支持的最低版本而非现装版本         |
+| `typescript`    | `^7.0.2`  | TS 7 (原生版); 见"为什么 typescript 不放 mise"                 |
+
+`@types/node` 的版本规则: 它描述的是某个 Node 大版本的 API 面. 本项目的运行时是 **Node 24** —— mise 给的是 v24.21.0, VSCode 1.139.1 (Electron 43.6.0 / Chromium 150) 的 extension host 内置 Node 24.20.0. 装 `@types/node@26` 会让编译器放行只有 Node 26 才有的 API, 到运行时才炸, 所以固定 `^24`.
+
+## 其它说明
+
+- lockfile 为 `aube-lock.yaml`. aube 用全局内容寻址 store + 符号链接, 同版本依赖跨项目**本来就零重复** (实测本项目整个 `node_modules` 只有 88K).
+- oxlint / oxfmt 由 mise 全局提供 (符合"开发工具用 mise"原则), 不进 devDependencies. oxfmt 例外之处在于它同时是扩展的**运行时**依赖: `src/oxfmtPath.ts` 按 `配置 > PATH > mise 安装目录` 顺序探测, 最终拿到的就是同一个二进制.
+- **为什么 `typescript` 不放 mise**: 全局 mise 里本来就没有它, 搬过去等于新增安装, 谈不上"复用"; 而留在 devDependencies 能由 `aube-lock.yaml` 锁定编译版本, 让 `aube install` 一步到位. 若日后想让全局 TS 复用到多个项目, 可以改成: 全局 `config.toml` 与项目 `mise.toml` 都加 `"npm:typescript" = "7"`, 再从这里删掉它.
 - 扩展规模很小 (零运行时依赖), `tsc` 直出 `out/` 即可, **不需要打包器**.
 - 若日后确实要打单文件, 按偏好选 **rolldown** (VoidZero), 输出 CJS 并 externalize `vscode`.
 - `@vscode/vsce` 是唯一非 oxc 生态的项 (微软官方的扩展打包工具), 无法替代.

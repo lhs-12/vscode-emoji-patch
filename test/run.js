@@ -14,7 +14,7 @@ const OUT = path.join(ROOT, 'out');
 const CODE_ROOT = '/usr/share/code/resources/app';
 const WORKBENCH = path.join(CODE_ROOT, 'out/vs/code/electron-browser/workbench/workbench.html');
 const PRODUCT = path.join(CODE_ROOT, 'product.json');
-const PLAN_DOC = '/home/hans/software-config/.temp/vscode-emoji-font-plan.md';
+const DESIGN_DOC = path.join(ROOT, 'DESIGN.md');
 const MDT_EXT = '/home/hans/.vscode/extensions/takumii.markdowntable-0.13.0';
 
 const range = require(path.join(OUT, 'range.js'));
@@ -80,19 +80,19 @@ async function main() {
     assert.equal(cps.size, built.count, '段展开后码点数应与 count 一致');
   });
 
-  if (existsSync(PLAN_DOC)) {
-    const doc = readFileSync(PLAN_DOC, 'utf8');
-    const m = /unicode-range:\s*([\s\S]*?);/.exec(doc);
-    const docSet = setOf(m[1]);
-    await test('码点集合与 plan 文档里的 range 完全一致', () => {
-      assert.deepEqual(
-        [...cps].sort((a, b) => a - b),
-        [...docSet].sort((a, b) => a - b),
-      );
-    });
-  } else {
-    console.log('  - 跳过 plan 文档对比 (不存在)');
-  }
+  // 与 DESIGN.md 附录里手写的完整列表交叉校验 (文档是唯一的人工可读副本)
+  await test('码点集合与 DESIGN.md 附录里的 range 完全一致', () => {
+    assert.ok(existsSync(DESIGN_DOC), 'DESIGN.md 不存在');
+    const doc = readFileSync(DESIGN_DOC, 'utf8');
+    const appendix = /# 附录: unicode-range 参考([\s\S]*)$/.exec(doc);
+    assert.ok(appendix, 'DESIGN.md 里找不到附录章节');
+    const m = /unicode-range:\s*([\s\S]*?);/.exec(appendix[1]);
+    assert.ok(m, '附录里找不到 unicode-range');
+    assert.deepEqual(
+      [...cps].sort((a, b) => a - b),
+      [...setOf(m[1])].sort((a, b) => a - b),
+    );
+  });
 
   await test('6 个 CJK 全角都在 range 内', () => {
     for (const c of [0x3030, 0x303d, 0x3297, 0x3299, 0x1f202, 0x1f237]) {

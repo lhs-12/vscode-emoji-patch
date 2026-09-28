@@ -18,10 +18,15 @@
 ## 开发
 
 ```bash
-aube install        # 依赖
-aube run build      # tsc -> out/
-aube run test       # 无依赖测试 (21 项)
-aube run lint       # oxlint
-aube run format     # oxfmt
-aube run package    # 出 .vsix
+mise install        # 工具依赖 (node/aube/oxlint/oxfmt): 版本与全局 mise 配置一致, 直接复用
+
+aube install        # 包依赖 (仅 @types/node, @types/vscode, typescript)
+
+aubr build          # tsc -> out/
+aubr test           # 无依赖测试 (21 项)
+aubr lint           # oxlint
+aubr format         # oxfmt
+aubr package        # 出 .vsix
 ```
+
+工具的版本声明在 `mise.toml`, 取舍理由见 `DESIGN.md` 的"工具链"章节.
