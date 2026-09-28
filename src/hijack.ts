@@ -25,7 +25,12 @@ export function hijackTableFormatter(extensionPath: string, oxfmt: string): Hija
   if (!existsSync(helperPath)) {
     return { wrapped: false, message: `找不到 ${helperPath}` };
   }
-  const helper = require(helperPath) as MarkdownTableHelper;
+  let helper: MarkdownTableHelper;
+  try {
+    helper = require(helperPath) as MarkdownTableHelper;
+  } catch (err) {
+    return { wrapped: false, message: `require 失败: ${err instanceof Error ? err.message : String(err)}` };
+  }
   if (helper.__emojiPatchWrapped === true) {
     return { wrapped: true, message: '已包装' };
   }

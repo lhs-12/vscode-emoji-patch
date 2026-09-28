@@ -18,9 +18,6 @@ export const MDT_HELPER_REL = 'out/markdownTableDataHelper.js';
 /** 额外补进 unicode-range 的 CJK 全角字符 (MiSans 缺字, oxfmt 也算 2 格). */
 export const EXTRA_CODEPOINTS: readonly number[] = [0x3030, 0x303d, 0x3297, 0x3299, 0x1f202, 0x1f237];
 
-/** MPE (Markdown Preview Enhanced) 扩展 id. */
-export const MPE_EXT_ID = 'shd101wyy.markdown-preview-enhanced';
-
 export const EMOJI_SEQUENCES_URL = 'https://www.unicode.org/Public/emoji/latest/emoji-sequences.txt';
 
 /** VS Code app 根目录下的相对路径. */

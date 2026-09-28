@@ -230,9 +230,6 @@ export function describeState(): string {
   } catch {
     patched = false;
   }
-  const hijack = setupTableHijack();
-  const preview = setupPreviewPatch();
-  return `workbench: ${patched ? '已注入' : '未注入'}; 表格格式化: ${
-    hijack ? (hijack.wrapped ? 'oxfmt' : `未生效 (${hijack.message})`) : '未启用'
-  }; 预览: ${preview ? (preview.installed ? '已注入' : `未注入 (${preview.message})`) : '未启用'}`;
+  // 注意: 这两个 describe 会顺手把两条内存包装装上 (激活时即生效).
+  return `workbench: ${patched ? '已注入' : '未注入'}; 表格格式化: ${describeHijack()}; 预览: ${describePreview()}`;
 }

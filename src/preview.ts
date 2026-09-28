@@ -108,17 +108,21 @@ export function installPreviewPatch(rules: readonly PreviewRule[]): PreviewResul
   }
   const origGet = descriptor.get as () => string;
   const origSet = descriptor.set as (value: string) => void;
-  Object.defineProperty(proto, 'html', {
-    configurable: descriptor.configurable,
-    enumerable: descriptor.enumerable,
-    get(this: unknown): string {
-      return origGet.call(this) as string;
-    },
-    set(this: unknown, value: string): void {
-      const injected = typeof value === 'string' ? injectPreviewCss(value, rules) : undefined;
-      origSet.call(this, injected ?? value);
-    },
-  });
+  try {
+    Object.defineProperty(proto, 'html', {
+      configurable: descriptor.configurable,
+      enumerable: descriptor.enumerable,
+      get(this: unknown): string {
+        return origGet.call(this) as string;
+      },
+      set(this: unknown, value: string): void {
+        const injected = typeof value === 'string' ? injectPreviewCss(value, rules) : undefined;
+        origSet.call(this, injected ?? value);
+      },
+    });
+  } catch (err) {
+    return { installed: false, message: `包装 html 访问器失败: ${err instanceof Error ? err.message : String(err)}` };
+  }
   restoreAccessor = () => {
     if (restoreAccessor) {
       Object.defineProperty(proto, 'html', descriptor);

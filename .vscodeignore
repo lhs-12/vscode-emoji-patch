@@ -1,4 +1,5 @@
 aube-lock.yaml
+*.vsix
 DESIGN.md
 mise.toml
 .gitignore

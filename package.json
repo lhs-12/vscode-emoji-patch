@@ -1,7 +1,7 @@
 {
   "name": "emoji-patch",
   "displayName": "Emoji Patch",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "个人专用: 让 emoji 走 Noto Color Emoji (彩色 + 严格 2 格), 并让 markdowntable 的格式化改走 oxfmt",
   "categories": [
@@ -17,7 +17,7 @@
     "format": "oxfmt",
     "check": "tsc -p . --noEmit && oxlint",
     "test": "node test/run.js",
-    "package": "aube dlx @vscode/vsce package --allow-missing-repository"
+    "package": "aubx @vscode/vsce package --allow-missing-repository"
   },
   "devDependencies": {
     "@types/node": "^24",

@@ -128,6 +128,10 @@ oxfmt 的单元格宽度以 Rust `unicode-width` 为准. 实测:
 │     在内存里包装 markdowntable 的 toFormatTableStr, 走 oxfmt             │
 │     —— 不改它的磁盘文件                                                  │
 │                                                                          │
+│  D. 预览注入 (需求 6)                                                    │
+│     内存劫持 webview 的 html 访问器, 给 MPE 与自带预览注入字体           │
+│     —— 不写任何文件, 不动 style.less                                     │
+│                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -303,14 +307,15 @@ Markdown Preview Enhanced (MPE) 的预览是独立 webview 文档, workbench 里
 
 # 适用范围
 
-| 区域                 | 是否生效 | 说明                                                                                       |
-| -------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| 编辑器               | ✅       | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                              |
-| 终端                 | 部分     | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
-| 调试控制台           | 部分     | 走 `debug.console.fontFamily`, 同上                                                        |
-| MPE 的 Markdown 预览 | ✅       | 走预览注入 (顶替族名), 要求它字体链的第一个族与编辑器一致                                  |
-| 自带的 Markdown 预览 | ✅       | 走预览注入 (前插族名), 不依赖也不改它的字体设置                                            |
-| 其它 webview         | ❌       | Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到                       |
+| 区域                   | 是否生效 | 说明                                                                                                             |
+| ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| 编辑器                 | ✅       | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                                                    |
+| 终端                   | 部分     | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face`                       |
+| 调试控制台             | 部分     | 走 `debug.console.fontFamily`, 同上                                                                              |
+| MPE 的 Markdown 预览   | ✅       | 走预览注入 (顶替族名), 要求它字体链的第一个族与编辑器一致                                                        |
+| 自带的 Markdown 预览   | ✅       | 走预览注入 (前插族名), 不依赖也不改它的字体设置                                                                  |
+| 自带的 Markdown 编辑器 | ❌       | 1.139 新增的富文本编辑器 (`vscode.markdown.editor`): 字体挂在内层 `.md-editor.md-theme-*` 上, 入口不统一, 暂不做 |
+| 其它 webview           | ❌       | Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到                                             |
 
 终端与调试控制台补齐写法 (关键是**族名一致**, 不再需要 `'EmojiPatch'`):
 
@@ -436,7 +441,7 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 
 ## 为什么不包装 `registerCustomEditorProvider`
 
-这是更"正规"的入口: 能直接拿到 MPE 的 provider, 在 `resolveCustomEditor` 里包装它给的 panel, 不用借临时面板. 但实测**抢不到**: 扩展宿主起来后 MPE 在 ~0.9s 前就注册完了 provider, 而任何激活事件 (`onStartupFinished` / `onLanguage:markdown`) 都晚于它; 一旦错过, 这个窗口里所有预览都不会被包装. 所以改用原型级的 `html` 访问器, 与激活顺序无关.
+这是更"正规"的入口: 能直接拿到预览的 provider, 在 `resolveCustomEditor` 里包装它给的 panel, 不用借临时面板. 但实测**抢不到**: 扩展宿主起来后 MPE 在 ~0.9s 前就注册完了 provider, 而任何激活事件 (`onStartupFinished` / `onLanguage:markdown`) 都晚于它 (自带预览同理, 它是内置扩展); 一旦错过, 这个窗口里所有预览都不会被包装. 所以改用原型级的 `html` 访问器, 与激活顺序无关.
 
 ---
 
@@ -447,25 +452,25 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 | 命令 id              | 标题              | 作用                                                              |
 | -------------------- | ----------------- | ----------------------------------------------------------------- |
 | `emojiPatch.enable`  | Emoji Patch: 生效 | 生成 range + 重写 CSS 块 + 同步 checksum + 重载窗口 (= 应用/更新) |
-| `emojiPatch.disable` | Emoji Patch: 失效 | 删除 CSS 块并还原 checksum + 重载窗口                             |
+| `emojiPatch.disable` | Emoji Patch: 失效 | 删除 CSS 块并还原 checksum, 顺手卸掉预览注入 + 重载窗口           |
 
 状态信息 (range 码点数 / 块是否存在 / 表格包装状态) 直接跟在两个命令的结果通知里, 不单独做 status 命令.
 
 ## 配置项
 
-| 配置                            | 默认                            | 说明                                                  |
-| ------------------------------- | ------------------------------- | ----------------------------------------------------- |
-| `emojiPatch.codeRoot`           | `/usr/share/code/resources/app` | VSCode app 根目录                                     |
-| `emojiPatch.codeFont`           | `""`                            | 要顶替的族名; 空则自动取 `editor.fontFamily` 第一个族 |
-| `emojiPatch.notoFamily`         | `Noto Color Emoji`              | 颜色 emoji 字体族                                     |
-| `emojiPatch.sizeAdjust`         | `80.3%`                         | 缩放, 保证 emoji 恰好 2 格                            |
-| `emojiPatch.oxfmtPath`          | `""`                            | oxfmt 可执行文件路径; 空则自动探测                    |
-| `emojiPatch.patchMarkdownTable` | `true`                          | 是否包装 markdowntable                                |
-| `emojiPatch.patchPreview`       | `true`                          | 是否给 MPE 预览注入同一份字体块 (仅内存)              |
+| 配置                            | 默认                            | 说明                                                   |
+| ------------------------------- | ------------------------------- | ------------------------------------------------------ |
+| `emojiPatch.codeRoot`           | `/usr/share/code/resources/app` | VSCode app 根目录                                      |
+| `emojiPatch.codeFont`           | `""`                            | 要顶替的族名; 空则自动取 `editor.fontFamily` 第一个族  |
+| `emojiPatch.notoFamily`         | `Noto Color Emoji`              | 颜色 emoji 字体族                                      |
+| `emojiPatch.sizeAdjust`         | `80.3%`                         | 缩放, 保证 emoji 恰好 2 格                             |
+| `emojiPatch.oxfmtPath`          | `""`                            | oxfmt 可执行文件路径; 空则自动探测                     |
+| `emojiPatch.patchMarkdownTable` | `true`                          | 是否包装 markdowntable                                 |
+| `emojiPatch.patchPreview`       | `true`                          | 是否给 MPE / 自带 Markdown 预览注入同一份字体 (仅内存) |
 
 ## 激活时机
 
-`onStartupFinished` (外加 `onLanguage:markdown`). 两条内存包装 (表格格式化 / 预览注入) 在激活时就装好; 预览注入额外要求 `workbench.html` 里已有标记块 (即"已生效"), 这样"失效"之后重载窗口就真的什么都不剩.
+`onStartupFinished` (唯一激活事件). 两条内存包装 (表格格式化 / 预览注入) 在激活时就装好; 预览注入额外要求 `workbench.html` 里已有标记块 (即"已生效"), 这样"失效"之后重载窗口就真的什么都不剩.
 
 ## 目录结构
 
@@ -488,9 +493,9 @@ vscode-emoji-patch/
 │   ├── elevate.ts               # 临时目录 + 只做 cp 的脚本 + pkexec
 │   ├── oxfmtPath.ts             # oxfmt 路径探测
 │   ├── hijack.ts                # 内存包装 markdowntable 的 toFormatTableStr
-│   ├── preview.ts               # 内存包装 webview 的 html, 给 MPE 预览注入字体块
+│   ├── preview.ts               # 内存包装 webview 的 html, 给 MPE / 自带预览注入字体
 │   └── commands.ts              # 生效 / 失效 两个命令
-├── test/run.js                  # 无依赖测试 (33 项, 含端到端)
+├── test/run.js                  # 无依赖测试 (36 项, 含端到端)
 └── out/                         # 构建产物
 ```
 
@@ -592,6 +597,17 @@ oxlint = "latest"
 - `@vscode/vsce` 是唯一非 oxc 生态的项 (微软官方的扩展打包工具), 无法替代.
 - 项目自身的 lint/format 用 oxlint/oxfmt; 扩展**运行时**也调 oxfmt, 同一条链.
 
+## 测试
+
+`test/run.js` 无依赖, `aubr test` 直接跑. 它不只是纯逻辑测试, 有几条必须在**真机**上跑:
+
+- 联网拉 `emoji-sequences.txt` (同时验证 range 生成结果).
+- 读本机 `/usr/share/code/.../workbench.html` 与 `product.json`: checksum 算法与写法必须和真的一致.
+- require 已安装的 markdowntable 与探测到的 oxfmt: 包装是否还接得上.
+- 文档守卫: `DESIGN.md` 附录里的 range 必须逐码点等于生成结果; 两份文档的**表格里**只允许出现 `unicode-range` 内的 emoji (被排除的字符渲染宽度对不上, 会排歪).
+
+覆盖面: range 解析/生成/读回, CSS 块顺序, 标记块注入/幂等/逐字节还原, checksum, 预览的两条规则与劫持/卸载, oxfmt 探测, 表格包装 (与真实 markdowntable + oxfmt 对比输出), 提权脚本, 两个命令端到端 (假 pkexec + 假 codeRoot), 以及两条内存包装的失败兜底 (拿不到/不可改的访问器, require 抛错).
+
 ---
 
 # 影响范围
@@ -644,7 +660,7 @@ oxlint = "latest"
 
 - 看 `✅❌` 是否变彩色; 或在 `Toggle Developer Tools` 里选中 `.monaco-editor` 看 computed `font-family`.
 - 跑一次 `Emoji Patch: 生效`: 通知里会报出顶替的族名和码点数, 已生效时提示"无需变更"; 表格包装与预览注入状态也在这条通知里.
-- 预览: 在 MPE 预览里右键 → `Inspect Element`, 看 `head` 里有没有注入的那段 `@font-face` (或重开预览后看 emoji 是否变彩色且与中文等宽).
+- 预览: 在预览里右键 → `Inspect Element`, 看 `head` 里有没有注入的那段 `@font-face` (MPE 是顶替族名那一份, 自带预览是 `EmojiPatchPreview` 那一份); 或重开预览后看 emoji 是否变彩色且与中文等宽.
 - 确认扩展已激活: `~/.config/Code/logs/*/window*/exthost/exthost.log` 里有 `ExtensionService#_doActivateExtension lhs-12.emoji-patch` 一行.
 
 ## 常见失败

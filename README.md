@@ -25,13 +25,13 @@
 
 ## 哪些地方生效
 
-| 区域                             | 是否生效 | 说明                                                                          |
-| -------------------------------- | -------- | ----------------------------------------------------------------------------- |
-| 编辑器                           | ✅       | 普通编辑、diff、Notebook 单元格                                               |
-| 终端 / 调试控制台                | 部分     | 这两处的字体是单独的配置项. 把它们的字体族写成和编辑器第一个族一样即可 (见下) |
-| MPE 的 Markdown 预览             | ✅       | 需要它的 `font-family` 第一个族和编辑器相同 (本机已在 `style.less` 里统一)    |
-| VSCode 自带的 Markdown 预览      | ✅       | 不需要额外配置; 预览自己的字体 (含 `markdown.preview.fontFamily`) 照旧生效    |
-| 其它预览 / 扩展面板 (Draw.io 等) | ❌       | 独立文档, 用不到; 这类地方的 emoji 会直接落到 Noto Color Emoji, 彩色但偏宽    |
+| 区域                        | 是否生效 | 说明                                                                                                            |
+| --------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| 编辑器                      | ✅       | 普通编辑、diff、Notebook 单元格                                                                                 |
+| 终端 / 调试控制台           | 部分     | 这两处的字体是单独的配置项. 把它们的字体族写成和编辑器第一个族一样即可 (见下)                                   |
+| MPE 的 Markdown 预览        | ✅       | 需要它的 `font-family` 第一个族和编辑器相同 (本机已在 `style.less` 里统一)                                      |
+| VSCode 自带的 Markdown 预览 | ✅       | 不需要额外配置; 预览自己的字体 (含 `markdown.preview.fontFamily`) 照旧生效                                      |
+| 其它预览 / 扩展面板         | ❌       | 独立文档, 用不到 (含 1.139 新加的 Markdown 编辑器、Draw.io 这类面板); emoji 会落到 Noto Color Emoji, 彩色但偏宽 |
 
 终端与调试控制台补齐写法:
 
@@ -91,7 +91,7 @@ code --install-extension emoji-patch-*.vsix --force   # 装 (已经装过就覆�
 ```bash
 aubr build    # 编译一次 (tsc -> out/)
 aubr watch    # 改代码时持续编译
-aubr test     # 33 项无依赖测试 (含端到端)
+aubr test     # 36 项无依赖测试 (含端到端)
 aubr lint     # oxlint (整仓)
 aubr format   # oxfmt (整仓, 含本文件与 DESIGN.md)
 aubr check    # tsc --noEmit + oxlint

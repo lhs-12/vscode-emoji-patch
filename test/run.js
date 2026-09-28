@@ -333,6 +333,34 @@ async function main() {
     const once = previewMod.injectPreviewCss(mpeHtml, rules);
     assert.equal(previewMod.injectPreviewCss(once, rules), undefined);
   });
+  await test('预览劫持: 拿不到 html 访问器时返回未安装 (不抛)', () => {
+    const bare = loadPreview({
+      ViewColumn: { Active: -1 },
+      window: { createWebviewPanel: () => ({ dispose() {}, webview: {} }) },
+    });
+    const r = bare.installPreviewPatch(rules);
+    assert.equal(r.installed, false);
+    assert.ok(r.message.includes('找不到'), r.message);
+    assert.equal(bare.isPreviewPatched(), false);
+  });
+  await test('预览劫持: 访问器不可改时返回未安装 (不抛)', () => {
+    class Locked {}
+    Object.defineProperty(Locked.prototype, 'html', {
+      configurable: false,
+      get() {
+        return '';
+      },
+      set() {},
+    });
+    const locked = loadPreview({
+      ViewColumn: { Active: -1 },
+      window: { createWebviewPanel: () => ({ dispose() {}, webview: Object.create(Locked.prototype) }) },
+    });
+    const r = locked.installPreviewPatch(rules);
+    assert.equal(r.installed, false);
+    assert.ok(r.message.includes('包装 html 访问器失败'), r.message);
+    assert.equal(locked.isPreviewPatched(), false);
+  });
   await test('预览劫持: 两种预览都被注入, 借的面板立刻 dispose', () => {
     const r = previewMod.installPreviewPatch(rules);
     assert.equal(r.installed, true);
@@ -451,6 +479,21 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- elevate
+  await test('hijack: require 抛错时返回未包装 (不抛)', () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emoji-patch-bad-ext-'));
+    fs.mkdirSync(path.join(dir, 'out'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'out', 'markdownTableDataHelper.js'), 'throw new Error("坏的模块");\n');
+    try {
+      const r = hijack.hijackTableFormatter(dir, process.execPath);
+      assert.equal(r.wrapped, false);
+      assert.ok(r.message.includes('require 失败'), r.message);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   section('elevate.ts');
   const elevate = require(path.join(OUT, 'elevate.js'));
   await test('preparePrivilegedDir: 临时目录 + 脚本内容正确 (不提权)', () => {
