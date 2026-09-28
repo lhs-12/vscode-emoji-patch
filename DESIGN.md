@@ -303,6 +303,14 @@ Markdown Preview Enhanced (MPE) 的预览是独立 webview 文档, workbench 里
 
 原型级包装与激活顺序无关: 只要早于"下一次给 webview 赋 HTML"即可 (为什么不能走更正规的 `registerCustomEditorProvider`, 见 [方案选用的考虑](#为什么不包装-registercustomeditorprovider)).
 
+借面板的代价与取舍: 那个临时面板会瞬间出现一个标签页再立刻 `dispose()`. 不改成"用到时再借", 是因为:
+
+- 自带预览走的是**自定义编辑器** (`registerCustomTextEditorProvider`), 它的 panel 由 VSCode 创建, 不经过 `vscode.window.createWebviewPanel` —— 包 `createWebviewPanel` 只能覆盖 MPE 那一类.
+- 而 provider 注册远早于任何激活事件 (见下条), 也没法在注册那一刻插一脚.
+- API 不暴露 webview 类, 除了借一个面板没有别的途径.
+
+实测这个面板立即 `dispose()`, 不影响布局与焦点; 日常使用也没观察到可见闪烁, 所以保持现方案.
+
 ---
 
 # 适用范围
@@ -434,6 +442,14 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 而且补进的真收益只有"正文里的 `⚠️` 从 2.50 格收窄到 2.00 格" —— 因为带上 VS16 的字符**早就在走彩色 Noto 了** (用 CDP 的 `CSS.getPlatformFontsForNode` 实测, `⚠️` 命中的就是 Noto Color Emoji), 所以"变彩色"这个诉求本来就已满足, 补进去只是修一个装饰性的 25% 宽度.
 
 结论: **不补**. 逐字符的候选清单与实测数据留在 `software-config` 的 `.temp/vscode-emoji-sample.md` (A/B/C/D 四组), 以后想改可以按同一套数据重新决定.
+
+## 为什么不做 pacman hook / 自动重打
+
+pacman hook 能做到 `visual-studio-code-bin` 升级后自动重打补丁. 不做, 理由:
+
+- 要有一个独立 CLI 才会被 hook 调用, 等于把 range 生成 + 注入 + checksum 这套逻辑在扩展之外再维护一份.
+- hook 以 root 跑在升级流程里, 却要联网拉 `emoji-sequences.txt`, 给升级引入网络依赖.
+- VSCode 升级并不频繁, 升级后跑一次 `Emoji Patch: 生效` 就一条命令; 而且系统级文件 (hook) 该由用户自己决定要不要装, 本项目不代劳.
 
 ## 为什么预览注入不写 `style.less` / `head.html`
 
@@ -648,7 +664,8 @@ oxlint = "latest"
 | -------------------- | -------------------------------------------------------------------------------------------------------------- |
 | VSCode / pacman 升级 | `workbench.html` / `product.json` 被覆盖 → patch 痕迹**自动清零**, 跑一次"生效"恢复 (`settings.json` 不受影响) |
 | `Emoji Patch: 失效`  | 删标记块并还原 checksum → 回到出厂状态                                                                         |
-| 卸载扩展             | 删 `~/.vscode/extensions/lhs-12.emoji-patch-*` → 无残留                                                        |
+| 卸载扩展             | 扩展目录被删; 若没先跑 `失效`, 那个 `<style>` 块与同步过的 checksum 会继续留在文件里 (无害, 下次升级覆盖)      |
+| 卸载后想彻底干净     | 先跑一次 `失效` 再卸载, 或 `sudo pacman -S visual-studio-code-bin` 重装                                        |
 | 重载窗口             | 内存包装 (表格格式化 / 预览注入) 随扩展宿主重建而消失, 重新激活时再装上                                        |
 | 每日常态             | 除 2 个安装文件的内容差异外零额外痕迹; 无后台进程                                                              |
 
@@ -711,6 +728,11 @@ oxlint = "latest"
 - MPE: HTML 14867 → 16083 字节, 注入的是 `font-family: "Iosevka Term"` + `size-adjust: 80.3%`
 - 自带: 注入了 `var(--markdown-font-family)` 同级的 `EmojiPatchPreview` 族 + 同一条 `size-adjust`
 - Edge 实测同构文档: 自带预览里 ✅❌ 由 2.50 格收窄到 2.00 格, 而预览自己的字体 (x 走 Segoe UI / 中文走 MiSans VF) 一字未变; MPE 预览里 ✅❌ 由 1.00 格黑白变 2.00 格彩色
+
+表格劫持在真实 VSCode 里做过 A/B (真 markdowntable + 真的 `markdowntable.format` 命令):
+
+- 包装开着: `__emojiPatchWrapped === true`, 格式化结果与 `oxfmt(input)` **逐字符相同**.
+- 把 `emojiPatch.patchMarkdownTable` 关掉做对照: 结果与 oxfmt 不同 —— markdowntable 自己把 `🎉` 算 3 格, 把 `⚠️` 算 1 格, 那一列竖线随即歪掉. 这正是本插件要修的问题.
 
 ---
 

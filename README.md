@@ -84,6 +84,24 @@ code --install-extension emoji-patch-*.vsix --force   # 装 (已经装过就覆�
 - **想彻底回到原样**: `Emoji Patch: 失效`, 或者 `sudo pacman -S visual-studio-code-bin` 重装 VSCode (那两个文件直接覆盖).
 - **想让 emoji 表跟上 Unicode 新版本**: 跑一次 `生效` 就会重新拉取码点表.
 
+## 卸载 / 不想要了
+
+| 情况              | 要做什么                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| 临时关掉          | 跑 `Emoji Patch: 失效`. 只禁用扩展不够 —— 注入的样式还留在 VSCode 的那个 html 文件里 |
+| 卸载扩展          | 建议先跑一次 `失效`, 再在扩展面板卸载                                                |
+| 卸载时忘了 `失效` | 也无所谓: 残留只是一个 `<style>` 块, 不影响启动, 下次 VSCode 升级覆盖时自动消失      |
+| 想彻底回到出厂    | `sudo pacman -S visual-studio-code-bin` 重装 VSCode, 那两个文件直接覆盖              |
+
+具体会留下 / 不会留下什么:
+
+- **不留**: 数据目录 (`globalStorage` 下没有本扩展的目录)、`settings.json` 里的 patch 痕迹、临时文件 (成功即删)、后台进程.
+- **会留**: 只有"没跑失效"时 `workbench.html` 里那一个标记块和 `product.json` 里同步过的 checksum —— 两者始终一致, 所以不会出现"安装损坏".
+- **要注意**: 如果你在设置界面改过任何 `emojiPatch.*` 项, VSCode 会把它们写进 `settings.json` (= dotfiles 那个文件), 卸载扩展**不会**自动清掉, 得手动删 (没改过默认值就没有这个问题).
+- 扩展目录本身 (`~/.vscode/extensions/lhs-12.emoji-patch-*`) 由卸载操作删掉.
+
+表格格式化与预览注入都是内存里的包装, 关掉窗口就没了, 和上面这些残留无关.
+
 ## 改功能 / 开发
 
 代码在 `src/`, 编译到 `out/`:
