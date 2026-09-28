@@ -96,7 +96,7 @@ Iosevka Term 自带 `✅❌` 字形, 所以显示为单色窄体; Chromium 没�
 - 与 oxfmt (`unicode-width`) 的"2 格"集合相比只有 35 个已知差异, 均属有意保留:
   - 26 个单个 regional indicator: 国旗由两个 RI 组成, 两个都必须在 range 内才能触发 Noto 连字; 单个 RI 是边角.
   - 9 个 Emoji 18 新码点: oxfmt 内置 `unicode-width 0.2.2` 数据落后, 更新后即一致.
-- `unicode-range` 之外还有 204 个窄 emoji (text presentation) 刻意排除, 以免把数字/键帽/普通符号染成彩色. 它们照旧回落到符号字体.
+- `unicode-range` 之外还有 204 个 emoji 刻意排除, 以免把数字/键帽/普通符号染成彩色 (它们默认是文字呈现). 这 204 个 = 带 VS16 的 `Basic_Emoji` 基码 (207) ∪ keycap 基码 (12), 再减去已经进 range 的 15 个. 不写 VS16 时它们照旧回落到符号字体.
 
 ## oxfmt 的宽度口径
 
@@ -283,12 +283,12 @@ if (!helper.__emojiPatchWrapped) {
 
 # 适用范围
 
-| 区域         | 是否生效      | 说明                                                                                       |
-| ------------ | ------------- | ------------------------------------------------------------------------------------------ |
-| 编辑器       | ✅            | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                              |
-| 终端         | ⚠️ 需对齐族名 | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
-| 调试控制台   | ⚠️ 需对齐族名 | 走 `debug.console.fontFamily`, 同上                                                        |
-| 独立 webview | ❌            | Markdown 预览 / Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到它     |
+| 区域         | 是否生效 | 说明                                                                                       |
+| ------------ | -------- | ------------------------------------------------------------------------------------------ |
+| 编辑器       | ✅       | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                              |
+| 终端         | 部分     | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
+| 调试控制台   | 部分     | 走 `debug.console.fontFamily`, 同上                                                        |
+| 独立 webview | ❌       | Markdown 预览 / Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到它     |
 
 终端与调试控制台补齐写法 (关键是**族名一致**, 不再需要 `'EmojiPatch'`):
 
@@ -328,9 +328,16 @@ if (!helper.__emojiPatchWrapped) {
 
 ## 已知边角
 
-- **单个 regional indicator** (`U+1F1E6-1F1FF`, 26 个, 如 `🇦`): `unicode-width` 算 1 格, Noto 渲染 2 格, oxfmt 会多补一个空格. 完整国旗 (两个 RI, 如 `🇨🇳`) 两边都是 2 格, 正常. 表里避免单个 RI.
-- **text-presentation 的 emoji** (如 `🏔`): oxfmt 算 1 格, 但字体链末尾的 `Noto Color Emoji` 仍会把它渲染成 ~2.5 格 —— 属于无解项 (CSS 无法表达"必须带 VS16"), 表里避免. 写成带 VS16 的 `🏔️` 则两边都是 2 格.
-- 本插件 `unicode-range` 之外的那 204 个窄 emoji 正是这一类, 刻意排除.
+下面都是"渲染宽度 ≠ oxfmt 算出来的宽度"的情况, 表格里要避开. 实测 (字体链就是本项目那串):
+
+- **在 `unicode-range` 内的字符** (EP=Yes ∪ 9 个修饰符基码 ∪ 6 个 CJK): 渲染 2.00 格, oxfmt 算 2 格 —— 表格里唯一可以放心用的 emoji.
+- **被排除的字符 + VS16**: 渲染 2.50 格, oxfmt 算 2 格, 多出半格. 表格里写 `⚠️` 之类的就是这种, 会把那一行排歪. 成因: CSS 的 `unicode-range` 无法表达"只在跟在 VS16 后面时才命中", 所以只能不写 VS16.
+- **被排除的字符的裸形式**: oxfmt 算 1 格, 渲染看到底谁有字形 ——
+  - Iosevka Term 自带字形的 (如 `⚠` `❤` `☺` `✔` `✖` `❄` `☀` `♠`): 渲染 1.00 格, 与 oxfmt 一致;
+  - 只有 Noto 有的 (如 `✂` `✈` `☎` `🏔`): 落到未缩放的 Noto, 渲染 2.50 格, 多出 1.5 格.
+- **单个 regional indicator** (`U+1F1E6-1F1FF`, 26 个, 如 `🇦`): `unicode-width` 算 1 格, Noto 渲染 2 格, oxfmt 会多补一个空格. 完整国旗 (两个 RI, 如 `🇨🇳`) 两边都是 2 格, 正常.
+
+结论: **markdown 表格里只用 `unicode-range` 内的 emoji**, 其余一律写文字 (`✅` / `部分` / `❌` 这种). `test/run.js` 里有一条检查会拦住违反的写法.
 
 ---
 
@@ -429,7 +436,7 @@ vscode-emoji-patch/
 │   ├── oxfmtPath.ts             # oxfmt 路径探测
 │   ├── hijack.ts                # 内存包装 markdowntable 的 toFormatTableStr
 │   └── commands.ts              # 生效 / 失效 两个命令
-├── test/run.js                  # 无依赖测试 (21 项, 含端到端)
+├── test/run.js                  # 无依赖测试 (24 项, 含端到端)
 └── out/                         # 构建产物
 ```
 
@@ -592,13 +599,13 @@ oxlint = "latest"
 
 # 风险与遗留
 
-| 项                                    | 说明                                                                 | 处理                                                     |
-| ------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------- |
-| markdowntable 内部结构变化            | require 路径或函数名变化                                             | try/catch + 命令结果里提示                               |
-| pkexec 在扩展宿主的弹窗               | 无 TTY, 依赖 polkit agent                                            | 失败时给出脚本路径手动执行                               |
-| VSCode 升级后 `product.json` 结构变化 | checksum key 位置                                                    | 找不到 key 时报错并保留临时脚本                          |
-| Unicode 发布新 emoji                  | range 会自动包含新码点, 但 `test/run.js` 里的码点数是刻意的 tripwire | 更新期望值, 并同步 DESIGN.md 附录 (测试会逐码点校验两边) |
-| 非 ASCII 路径 / 编码                  | `workbench.html` 读写                                                | 按 UTF-8 字节处理, 不做编码转换                          |
+| 项                                    | 说明                                                                                            | 处理                                           |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| markdowntable 内部结构变化            | require 路径或函数名变化                                                                        | try/catch + 命令结果里提示                     |
+| pkexec 在扩展宿主的弹窗               | 无 TTY, 依赖 polkit agent                                                                       | 失败时给出脚本路径手动执行                     |
+| VSCode 升级后 `product.json` 结构变化 | checksum key 位置                                                                               | 找不到 key 时报错并保留临时脚本                |
+| Unicode 发布新 emoji                  | range 会自动包含新码点, 但 `test/run.js` 里两个数是刻意的 tripwire (码点数 1243 / 被排除数 204) | 更新期望值, 并同步本文档 (附录列表与 204 那句) |
+| 非 ASCII 路径 / 编码                  | `workbench.html` 读写                                                                           | 按 UTF-8 字节处理, 不做编码转换                |
 
 # 里程碑
 

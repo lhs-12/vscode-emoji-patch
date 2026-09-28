@@ -152,6 +152,48 @@ async function main() {
   await test('不含 EP=No 的 U+1F3D4 (🏔)', () => {
     assert.ok(!cps.has(0x1f3d4));
   });
+
+  // 表格里只能用 range 内的 emoji: 被排除的字符渲染宽度与 oxfmt 的口径对不上
+  // (被排除 = 带 VS16 的 Basic_Emoji 基码 ∪ keycap 基码, 再减去 range)
+  const excluded = (() => {
+    const ex = new Set();
+    for (const raw of seq.split('\n')) {
+      const line = raw.split('#')[0].trim();
+      if (!line) {
+        continue;
+      }
+      const fields = line.split(';').map((x) => x.trim());
+      const toks = fields[0].split(/\s+/);
+      if ((fields[1] === 'Basic_Emoji' && toks.length > 1) || fields[1] === 'Emoji_Keycap_Sequence') {
+        ex.add(parseInt(toks[0], 16));
+      }
+    }
+    return [...ex].filter((c) => !cps.has(c));
+  })();
+  await test(`被排除的 emoji: ${excluded.length} 个 (与文档里的数一致)`, () => {
+    assert.equal(excluded.length, 204);
+  });
+  // 其中 12 个是 keycap 基码 (# * 0-9), 在表格里就是普通 ASCII, 不用管
+  const tableUnsafe = excluded.filter((c) => c > 0x7f);
+  for (const file of ['README.md', 'DESIGN.md']) {
+    // 回调是同步的, 不必 await (也就避开了 no-await-in-loop)
+    test(`${file}: 表格里不用 range 之外的 ${tableUnsafe.length} 个 emoji`, () => {
+      const found = [];
+      readFileSync(path.join(ROOT, file), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (!line.trimStart().startsWith('|')) {
+            return;
+          }
+          for (const ch of line) {
+            if (tableUnsafe.includes(ch.codePointAt(0))) {
+              found.push(`${file}:${i + 1} ${ch}`);
+            }
+          }
+        });
+      assert.equal(found.length, 0, `表格里出现会错位的 emoji (${found.join(', ')}) —— 换成 range 内的 emoji 或纯文字`);
+    });
+  }
   await test('extractRangeFromHtml 能读回 range', () => {
     const html = `<style>@font-face { unicode-range: ${built.range}; }</style>`;
     assert.equal(range.extractRangeFromHtml(html), built.range);
