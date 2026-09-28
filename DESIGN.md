@@ -1,7 +1,10 @@
-<h1><center>VSCode Emoji Patch 插件设计</center></h1>
+<h1><center>VSCode Emoji Patch (设计 + 参考)</center></h1>
 
 插件 id: `lhs-12.emoji-patch`  
 项目目录: `~/MyProjects/vscode-emoji-patch`
+
+个人专用扩展: 让 VSCode 的 emoji 与 kitty 表现一致 (彩色 + 严格 2 格宽), 并让 markdowntable 的表格格式化改走 oxfmt.  
+不含任何通用性设计, 不考虑发布 Marketplace.
 
 ---
 
@@ -9,34 +12,32 @@
 
 ## 背景
 
-当前为了让 VSCode 里的 emoji 与 kitty 表现一致 (彩色 + 严格 2 格宽, 与 oxfmt 表格对齐一致), 采用手工 patch 的方式:
+VSCode (Electron/Chromium) 按 `editor.fontFamily` 列表逐字符取**第一个含该字形的字体**.  
+Iosevka Term 自带 `✅❌` 字形, 所以显示为单色窄体; Chromium 没有 kitty 那种"按 emoji presentation 强制换字体"的逻辑, fontconfig 规则也无效 (它只带 family, 不带 charset).
 
-- 改 `/usr/share/code/resources/app/out/vs/code/electron-browser/workbench/workbench.html`, 注入 `<style>` (`@font-face` + `unicode-range`).
-- 同步改 `product.json` 里的 checksum.
-- 手写 `editor.fontFamily` 加 `'EmojiPatch'`.
+要按码点分流, 只能用 **`@font-face` + `unicode-range`**.
 
-痛点:
+之前是手工 patch: 改 `workbench.html` 注入 `<style>`, 同步 `product.json` 的 checksum, 并在 `editor.fontFamily` 最前加一个 patch 专用名字. 痛点:
 
-- 要改好几处, 容易漏.
-- VSCode 每次升级 `workbench.html` 被覆盖, 全部重来.
-- Unicode 发布新 emoji 后, `unicode-range` 需要重新生成.
-- `editor.fontFamily` 里出现 patch 专用名字, 且这个文件是 dotfiles 仓库的, 不想让 patch 进仓库.
+- 要改好几处, 容易漏; 每次 VSCode 升级 `workbench.html` 被覆盖, 全部重来.
+- Unicode 发布新 emoji 后要重新生成 `unicode-range`.
+- patch 专用名字写进了 dotfiles 仓库里的 `settings.json`, 不想留.
 
 ## 目标
 
-做一个**个人专用**的 VSCode 扩展, 把上述流程自动化. 不考虑通用性, 不考虑发布到 Marketplace, 不考虑对别人环境的兼容.
+把上述流程收进一个个人专用扩展.
 
 ## 需求清单
 
-| #   | 需求                        | 说明                                                            |
-| --- | --------------------------- | --------------------------------------------------------------- |
-| 1   | 覆盖 style                  | 能往 workbench 注入 `@font-face` CSS (扩展 API 做不到, 见下)    |
-| 2   | 隐式替换字体族              | 配置里不出现任何 patch 名字, 但运行时 emoji 走 Noto Color Emoji |
-| 3   | 升级后重新生效              | VSCode 升级后, 一条命令恢复 patch                               |
-| 4   | 更新 `unicode-range`        | 不升级 VSCode 也能刷新 emoji 码点集合                           |
-| 5   | 劫持 markdowntable 的格式化 | 该插件所有会重排表格的操作都改走 oxfmt                          |
+| #   | 需求                        | 说明                                                              |
+| --- | --------------------------- | ----------------------------------------------------------------- |
+| 1   | 覆盖 style                  | 能往 workbench 注入 `@font-face` CSS (扩展 API 做不到, 见下)      |
+| 2   | 隐式替换字体族              | 配置里不出现任何 patch 名字, 但运行时 emoji 走 Noto Color Emoji   |
+| 3   | 升级后重新生效              | VSCode 升级后, 一条命令恢复 patch                                 |
+| 4   | 更新 `unicode-range`        | 不升级 VSCode 也能刷新 emoji 码点集合                             |
+| 5   | 劫持 markdowntable 的格式化 | 该插件所有会重排表格的操作都改走 oxfmt                            |
 
-约束:
+## 约束
 
 - 幂等: 命令可重复执行, 结果只有一份配置.
 - 不改 dotfiles 仓库里的 `settings.json`.
@@ -44,19 +45,11 @@
 
 ---
 
-# 必要的背景知识
+# 背景知识
 
-## 为什么必须用 `@font-face`
+## 为什么必须改 workbench.html
 
-VSCode 的 `editor.fontFamily` 是一串 CSS font-family. 字体匹配按列表顺序找**第一个含该字形的字体**.
-
-- 代码字体 (Iosevka Term) 含 `U+2705` `U+274C`, 于是这两个码点被它抢走, 渲染成窄体单色.
-- 想让指定码点走 Noto Color Emoji, 只有 CSS `@font-face` + `unicode-range` 能做到按码点分流, 且能带 `size-adjust`.
-- 扩展运行在 extension host (Node 进程), **没有**往 workbench 注入 CSS 的 API. 所以只能"改 `workbench.html`", 与现在手工做法同路, 区别只是自动化.
-
-### 为什么这件事无法"只在内存里做"
-
-扩展运行在 extension host, 拿不到 workbench 的 DOM, 也**没有注入 CSS 的扩展 API**. 唯一能按码点改 editor 字体匹配的机制是**文档级 `@font-face` + `unicode-range`**, 而 `@font-face` 必须存在于 workbench 页面里.
+扩展运行在 extension host (Node 进程), 拿不到 workbench 的 DOM, 也**没有注入 CSS 的扩展 API**. 唯一能按码点改 editor 字体匹配的机制是**文档级 `@font-face` + `unicode-range`**, 而 `@font-face` 必须存在于 workbench 页面里.
 
 "桥接字体"替代方案也走不通:
 
@@ -66,53 +59,55 @@ VSCode 的 `editor.fontFamily` 是一串 CSS font-family. 字体匹配按列表�
 
 所以**改 `workbench.html` 是唯一路径**. 代价已压到最小: 只加一个带标记的 `<style>` 块, 可一键移除, 且 VSCode 升级会自动清除.
 
-## `size-adjust: 80.3%`
+## `@font-face` 的能力边界
+
+- `@font-face` 只是**定义**, 不被字体链引用就不生效 (手工方案靠 `editor.fontFamily` 里加名字; 本插件靠"族名顶替", 见下).
+- **只按单码点匹配, 无法表达"必须带 VS16"**. 例如把 `U+2764` 放进 range, 单独的 `❤` 也会跟着变彩色.
+- `unicode-range` 只限制**候选字体**; 字体缺字形会自动往后回落, 范围略宽不会强行换字形.
+- 命中字符会从"单色单宽"变成"彩色双宽", 列对齐随之变化 —— 所以必须同时管住格式化工具的宽度口径 (见 [表格对齐](#表格对齐)).
+
+## `size-adjust` 与"2 格"不变量
 
 - Noto Color Emoji: upem 2048, advance 2550 = 1.2451em.
-- 一个单元格 = 0.5em. 2 格 = 1.0em.
-- `1.2451 × 0.803 ≈ 1.0`. 所以 `size-adjust: 80.3%` 让 emoji 恰好 2 格.
-- 判定标准是 `advance == 整数倍单元格宽度`, 这是真正的对齐不变量.
+- 一个单元格 = 0.5em, 2 格 = 1.0em.
+- `1.2451 × 0.803 ≈ 1.0`, 所以 `size-adjust: 80.3%` 让 emoji 恰好 2 格.
+- 真正的对齐不变量是 **`advance == 整数倍单元格宽度`**; 不加 `size-adjust` 的话每个 emoji 比 2 格宽约 0.49 格, 表格末尾 `|` 会右偏.
+- 代价: emoji 视觉缩小约 20%.
 
 ## `unicode-range` 的码点集合
 
 取 kitty 的 `wide_emoji` 语义: **默认 emoji 呈现** (`Emoji_Presentation=Yes`) + 9 个修饰符基码.
 
-由 UCD `emoji-sequences.txt` 生成, 规则:
+规则 (由 UCD `emoji-sequences.txt` 生成):
 
-- `Basic_Emoji`: 只取单码点项 (`len(tokens) < 2`).
+- `Basic_Emoji`: 只取单码点项 (`len(tokens) < 2`), 即带 VS16 的项跳过.
 - `RGI_Emoji_Flag_Sequence`: 取两个 regional indicator.
 - `RGI_Emoji_Tag_Sequence`: 取首个码点 (`U+1F3F4`).
 - `RGI_Emoji_Modifier_Sequence`: 取首个码点 (即那 9 个基码).
+- 再把 6 个 CJK 全角字符并入集合: `U+3030` `U+303D` `U+3297` `U+3299` `U+1F202` `U+1F237`.
 
-末尾再把 6 个 CJK 全角字符并入集合 (MiSans 缺字, 且 oxfmt 也算 2 格):
+结果: **1243 个码点, 86 段** (相邻码点统一合并; 6 个 CJK 全角中有 4 个并入了相邻区间). 完整列表见 [附录](#附录-unicode-range-参考).
 
-```
-U+3030, U+303D, U+3297, U+3299, U+1F202, U+1F237
-```
+几个刻意的取舍:
 
-结果: **1243 个码点, 86 段** (相邻码点统一合并; 6 个 CJK 全角中有 4 个已并入相邻区间).
+- **不要**用完整的 Unicode `Emoji` 属性集合: 它含 keycap 基码 `0-9 # *`, 而 Noto 有这些字形 → 正文数字会全变彩色. 上面这份已排除.
+- 末尾那 6 个 CJK 全角字符**不是** emoji, 但 MiSans 没有它们, 不补就会落到 `Noto Color Emoji` 渲染成 ~2.5 格; oxfmt 对它们按 2 格算 (全角), 所以补进 range (结果是彩色 2 格).
+- 与 oxfmt (`unicode-width`) 的"2 格"集合相比只有 35 个已知差异, 均属有意保留:
+  - 26 个单个 regional indicator: 国旗由两个 RI 组成, 两个都必须在 range 内才能触发 Noto 连字; 单个 RI 是边角.
+  - 9 个 Emoji 18 新码点: oxfmt 内置 `unicode-width 0.2.2` 数据落后, 更新后即一致.
+- `unicode-range` 之外还有 204 个窄 emoji (text presentation) 刻意排除, 以免把数字/键帽/普通符号染成彩色. 它们照旧回落到符号字体.
 
-与 oxfmt (`unicode-width`) 的"2 格"集合相比只有 35 个已知差异, 均属有意保留:
+## oxfmt 的宽度口径
 
-- 26 个单个 regional indicator: 国旗由两个 RI 组成, 两个 RI 都必须在 range 内才能触发 Noto 的连字. 单个 RI 是边角 (kitty 算 2, oxfmt 算 1).
-- 9 个 Emoji 18 新码点: oxfmt 内置 `unicode-width 0.2.2` 数据落后, 其后更新即一致.
+oxfmt 的单元格宽度以 Rust `unicode-width` 为准. 实测:
 
-`unicode-range` 之外还有 204 个窄 emoji (text presentation) 刻意排除, 以免把数字/键帽/普通符号染成彩色. 它们照旧回落到符号字体.
+- `✅` = 2 格; `❤` = 1 格 / `❤️` = 2 格; `🏔` = 1 格 / `🏔️` = 2 格.
 
-## oxfmt 的表格宽度
-
-oxfmt 的单元格宽度以 `unicode-width` 为准. 实测:
-
-- `✅` = 2 格, `❤` = 1 格 / `❤️` = 2 格.
-- `🏔` = 1 格 / `🏔️` = 2 格.
-
-表格对齐的正确做法就是"让渲染宽度等于 oxfmt 的宽度", 这也是选择 oxfmt 作为唯一格式化器的原因.
+表格对齐的正确做法就是"让渲染宽度等于 oxfmt 的宽度", 这也是本插件把 markdowntable 的渲染出口接到 oxfmt 的原因.
 
 ---
 
 # 整体方案
-
-扩展由三块互相独立的机制组成, 分别对应需求.
 
 ```
 ┌─────────────────────────── lhs-12.emoji-patch ───────────────────────────┐
@@ -136,7 +131,7 @@ oxfmt 的单元格宽度以 `unicode-width` 为准. 实测:
 
 ## A. 字体分流: 族名顶替
 
-不新增字体族名字, 而是**抢用**用户字体链里第一个族的名字, 再把真字体用 `local()` 引回来.
+不新增字体族名, 而是**抢用**字体链里第一个族的名字, 再把真字体用 `local()` 引回来.
 
 ```css
 /* ① 把 "Iosevka Term" 整个交还给系统 (fontconfig 会按字重/斜体取对应字面) */
@@ -157,31 +152,31 @@ oxfmt 的单元格宽度以 `unicode-width` 为准. 实测:
 "editor.fontFamily": "'Iosevka Term', 'MiSans', 'MiSans L3','Symbols Nerd Font Mono','Noto Color Emoji'"
 ```
 
-族名从 `editor.fontFamily` 的第一个族动态取得 (默认 `Iosevka Term`).
+族名从 `editor.fontFamily` 的第一个族动态取得 (默认 `Iosevka Term`). 自动探测时会跳过早期手工方案用的 `EmojiPatch` 这个名字, 所以即使 dotfile 暂时没清干净也能正确顶替到真字体族.
 
 ### 实测依据 (本地 Edge / Chromium, 100px)
 
-| 场景 | 实测宽度 | 结论 |
-| --- | --- | --- |
-| `✅` in `'Iosevka Term'`, 只写 ② | 100.19 | `@font-face` 赢, 期望 1.245em × 80.3% = 100 |
-| `X` in `'Iosevka Term'`, 只写 ② | 72.22 | 系统 Iosevka 被整体顶替, 掉到兜底字体 |
-| `X` in `'Iosevka Term'`, 写 ①+② | 50 | 真 Iosevka 回归 |
-| `✅`, 写 ①+② | 100.19 | emoji 仍走 Noto |
-| 把 ② 写在 ① 之前 | `✅` = 50 | 顺序敏感, **后写的 `@font-face` 生效** |
-| `local("DejaVu Sans")` 单条, 400 vs 700 | 388.92 → 416.52 | 真粗体被 fontconfig 取到 |
-| 无粗体字面的字体 (Century 等), 400 vs 700 | 相同 | 证明上一条不是伪粗体 |
+| 场景                                          | 实测宽度      | 结论                                       |
+| --------------------------------------------- | ------------- | ------------------------------------------ |
+| `✅` in `'Iosevka Term'`, 只写 ②               | 100.19        | `@font-face` 赢, 期望 1.245em × 80.3% = 100 |
+| `X` in `'Iosevka Term'`, 只写 ②                | 72.22         | 系统 Iosevka 被整体顶替, 掉到兜底字体      |
+| `X` in `'Iosevka Term'`, 写 ①+②                | 50            | 真 Iosevka 回归                            |
+| `✅`, 写 ①+②                                   | 100.19        | emoji 仍走 Noto                            |
+| 把 ② 写在 ① 之前                              | `✅` = 50     | 顺序敏感, **后写的 `@font-face` 生效**     |
+| `local("DejaVu Sans")` 单条, 400 vs 700       | 388.92 → 416.52 | 真粗体被 fontconfig 取到                 |
+| 无粗体字面的字体 (Century 等), 400 vs 700     | 相同          | 证明上一条不是伪粗体                       |
 
 要点:
 
-- ① 必须写; 否则同族名被整体顶替, 普通字符会掉到兜底字体.
+- ① **必须**写; 否则同族名被整体顶替, 普通字符会掉到兜底字体.
 - ① 一条即可覆盖该族所有字重/斜体.
-- ② 的 `unicode-range` 之外的字符 → 该族没有字形 → 照旧往后回落. 行为与手工 patch 时**完全一致**.
+- ② 的 `unicode-range` 之外的字符 → 该族没有字形 → 照旧往后回落. 行为与手工 patch 时完全一致.
 
 ## B. 注入 CSS: 标记块 + checksum + pkexec
 
 ### 写入内容
 
-在 `workbench.html` 的 `</style>` 之前 (或 `</head>` 之前) 写入带标记的块, 便于幂等替换:
+在 `workbench.html` 的 `</head>` 之前插入带标记的块 (按该行缩进对齐):
 
 ```html
 <style>
@@ -192,11 +187,12 @@ oxfmt 的单元格宽度以 `unicode-width` 为准. 实测:
 </style>
 ```
 
-替换逻辑: 若已存在 `:start` / `:end` 标记, 只替换两者之间; 否则插入新块.
+替换逻辑: 若已存在 `:start` / `:end` 标记, 只替换两者之间; 否则插入新块, 并顺手清掉早期手工 patch 留下的、含 `EmojiPatch` 的旧 `<style>` 块.  
+CSP 是 `style-src 'self' 'unsafe-inline'`, `file://` 外链样式会被拦, 所以只能内联.
 
 ### checksum 同步
 
-VSCode 启动时校验 `product.json` 里 `workbench.html` 的 checksum, 不匹配会提示安装损坏. 必须同步:
+VSCode 启动时校验 `product.json` 里 `workbench.html` 的 checksum, 不匹配会提示"安装损坏". 必须同步:
 
 ```
 值   = base64(sha256(workbench.html 原始字节)).rstrip('=')
@@ -220,7 +216,7 @@ VSCode 启动时校验 `product.json` 里 `workbench.html` 的 checksum, 不匹�
 3. 成功 -> 删除 tmp/; 失败 -> 保留并提示用户手动 sudo bash tmp/apply.sh
 ```
 
-- 先算后拷, 保证两个文件一致地落盘.
+- 先算后拷, 保证两个文件一致落盘.
 - **不使用** `~/.cache/emoji-patch` 之类的数据目录.
 
 ### 生效
@@ -250,7 +246,7 @@ if (!helper.__emojiPatchWrapped) {
   helper.toFormatTableStr = (tableData) => {
     const md = orig(tableData);
     const r = spawnSync(oxfmtPath, ['--stdin-filepath', 'x.md'], { input: md, encoding: 'utf8' });
-    return (r.status === 0 && r.stdout) ? r.stdout : md;   // 失败退回原样
+    return (r.status === 0 && r.stdout) ? r.stdout.replace(/[\r\n]+$/, '') : md;   // 失败退回原样
   };
   helper.__emojiPatchWrapped = true;
 }
@@ -263,6 +259,42 @@ if (!helper.__emojiPatchWrapped) {
 - helper 内部的 2 处局部调用 (`tsvToTableData` / `insertColumn`) 会绕过包装, 但命令层随后会再用 `mtdh.toFormatTableStr` 重新渲染其结构, 仍会被覆盖.
 
 必须用 `spawnSync`: `toFormatTableStr` 是同步函数, 且其返回值被同步用于计算光标位置. 下游会重新解析 oxfmt 的结果, 光标不受影响.
+
+---
+
+# 适用范围
+
+| 区域         | 是否生效     | 说明                                                                                        |
+| ------------ | ------------ | ------------------------------------------------------------------------------------------- |
+| 编辑器       | ✅           | 走 `editor.fontFamily`, 覆盖普通编辑 / diff / Notebook 单元格                               |
+| 终端         | ⚠️ 需对齐族名 | 走 `terminal.integrated.fontFamily`, 族名要和编辑器第一个族一致才能复用同一个 `@font-face` |
+| 调试控制台   | ⚠️ 需对齐族名 | 走 `debug.console.fontFamily`, 同上                                                         |
+| 独立 webview | ❌           | Markdown 预览 / Notebook 富输出 / 扩展面板 (Draw.io, Excalidraw…) 是独立文档, 用不到它      |
+
+终端与调试控制台补齐写法 (关键是**族名一致**, 不再需要 `'EmojiPatch'`):
+
+```jsonc
+"terminal.integrated.fontFamily": "'Iosevka Term', monospace",
+"debug.console.fontFamily": "'Iosevka Term', monospace",
+```
+
+> webview 里的 emoji 会直接落到 `Noto Color Emoji`, 是彩色但 ~2.5 格, 不经 `size-adjust`; 这是独立文档的固有限制.
+
+---
+
+# 表格对齐
+
+## 为什么以 oxfmt 为准
+
+- `oxfmt` (`oxc.oxc-vscode`) 的 markdown 格式化用 Rust `unicode-width`, emoji (含 ZWJ / VS16) 一律计 2 格.
+- `takumii.markdowntable` 的 `getLen` 是**手写码点区间** (astral emoji 记 3 格, `⌚` 记 1 格), 到处算错. 所以只让它做**结构操作** (导航, 增删/移动行列, 对齐, TSV/CSV), 不允许它决定列宽 —— 本插件的做法就是把它唯一的渲染出口 `toFormatTableStr` 接到 oxfmt 上.
+- Markdown Preview Enhanced 没有表格格式化 (只有预览端的 colspan/rowspan).
+
+## 已知边角
+
+- **单个 regional indicator** (`U+1F1E6-1F1FF`, 26 个, 如 `🇦`): `unicode-width` 算 1 格, Noto 渲染 2 格, oxfmt 会多补一个空格. 完整国旗 (两个 RI, 如 `🇨🇳`) 两边都是 2 格, 正常. 表里避免单个 RI.
+- **text-presentation 的 emoji** (如 `🏔`): oxfmt 算 1 格, 但字体链末尾的 `Noto Color Emoji` 仍会把它渲染成 ~2.5 格 —— 属于无解项 (CSS 无法表达"必须带 VS16"), 表里避免. 写成带 VS16 的 `🏔️` 则两边都是 2 格.
+- 本插件 `unicode-range` 之外的那 204 个窄 emoji 正是这一类, 刻意排除.
 
 ---
 
@@ -289,23 +321,27 @@ if (this._commands.has(id)) {
 - 需要处理版本目录名变化 (`takumii.markdowntable-*`).
 - 运行时改了文件, 已加载的模块不会重新加载, 需要重启扩展宿主.
 
-而"内存里包装"完全没有这些问题. 唯一剩余风险是 markdowntable 改内部文件名/结构, 那时 require 路径失效 —— 用 `try/catch` 兜底, 并在状态命令里提示.
+而"内存里包装"完全没有这些问题. 唯一剩余风险是 markdowntable 改内部文件名/结构, 那时 require 路径失效 —— 用 `try/catch` 兜底, 并在命令结果里提示.
 
-> 关于完整性校验: 已确认 `verifySignature` 只在**下载/安装/升级时**校验 `.vsix` 签名 (`extensionManagementService.downloadExtension`), **不校验已安装扩展的文件内容**. 所以即使是改文件方案也不会有"被判定损坏"的问题 —— 但既然内存包装更干净, 就不改文件.
+> 关于完整性校验: 已确认 `verifySignature` 只在**下载/安装/升级时**校验 `.vsix` 签名 (`extensionManagementService.downloadExtension`), **不校验已安装扩展的文件内容**. 所以即便是改文件方案也不会有"被判定损坏"的问题 —— 但既然内存包装更干净, 就不改文件.
 
 ## 为什么不写 `settings.json`
 
-`settings.json` 是指向 dotfiles 仓库的符号链接, 写它等于把 patch 带进仓库. 且需求明确要求配置里不出现 patch 名字.
+`settings.json` 是指向 dotfiles 仓库的符号链接, 写它等于把 patch 带进仓库, 且需求明确要求配置里不出现 patch 名字.
 
-改用"族名顶替"后, 只需 `editor.fontFamily` 保持正常的字体列表即可, **无需任何写入**.
+改用"族名顶替"后, `editor.fontFamily` 保持正常的字体列表即可, **无需任何写入**.
 
 ## 为什么用 pkexec 而不是"用户可写安装"
 
 VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code` 属 root, 无法写.
 
-- `pkexec`: 系统已装, 每次执行弹一次 polkit 授权. 代价是每点 3/点 4 一次授权, 可接受.
+- `pkexec`: 系统已装, 每次执行弹一次 polkit 授权. 代价是需求 3/4 各一次授权, 可接受.
 - `sudo -n`: 需要免密配置, 引入额外系统配置, 放弃.
 - `chmod g+w` 目标目录: pacman 升级后会重置, 不稳定, 放弃.
+
+## 为什么不用 Custom CSS 扩展
+
+`be5invis.vscode-custom-css` 之类同样要 patch `workbench.html` (并同步 checksum); 旧手工方案还要额外在 `editor.fontFamily` 里引用 `'EmojiPatch'`. 自己做能一并解决需求 3/4/5, 且不留这个引用.
 
 ## oxfmt 的 round-trip 差异 (需接受)
 
@@ -322,7 +358,7 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 - `spawnSync` 调 CLI: 无需常驻, 每次格式化几十毫秒, 表格操作频率低, 够用.
 - 不用 LSP: 常驻进程 + 生命周期管理复杂度不值得.
 - 不用格式化 provider API (`vscode.executeFormatRangeProvider`): 它是异步的, 塞不进同步的 `toFormatTableStr`.
-- oxfmt 路径: 优先取配置项, 其次自动探测 (`which oxfmt`, mise 安装目录).
+- oxfmt 路径: 优先取配置项, 其次自动探测 (PATH, mise 安装目录).
 
 ---
 
@@ -330,23 +366,23 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 
 ## 命令
 
-| 命令 id | 标题 | 作用 |
-| --- | --- | --- |
-| `emojiPatch.enable` | Emoji Patch: 生效 | 生成 range + 重写 CSS 块 + 同步 checksum + 重载窗口 (= 应用/更新) |
-| `emojiPatch.disable` | Emoji Patch: 失效 | 删除 CSS 块并还原 checksum + 重载窗口 |
+| 命令 id              | 标题               | 作用                                                                  |
+| -------------------- | ------------------ | --------------------------------------------------------------------- |
+| `emojiPatch.enable`  | Emoji Patch: 生效  | 生成 range + 重写 CSS 块 + 同步 checksum + 重载窗口 (= 应用/更新)     |
+| `emojiPatch.disable` | Emoji Patch: 失效  | 删除 CSS 块并还原 checksum + 重载窗口                                 |
 
-状态信息 (range 码点数 / 块是否存在 / markdowntable 包装状态) 直接跟在两个命令的执行结果通知里, 不单独做 status 命令.
+状态信息 (range 码点数 / 块是否存在 / 表格包装状态) 直接跟在两个命令的结果通知里, 不单独做 status 命令.
 
 ## 配置项
 
-| 配置 | 默认 | 说明 |
-| --- | --- | --- |
-| `emojiPatch.codeRoot` | `/usr/share/code/resources/app` | VSCode app 根目录 |
-| `emojiPatch.codeFont` | `""` | 要顶替的族名; 空则自动取 `editor.fontFamily` 的第一个族 |
-| `emojiPatch.oxfmtPath` | `""` | oxfmt 可执行文件路径; 空则自动探测 |
-| `emojiPatch.notoFamily` | `Noto Color Emoji` | 颜色 emoji 字体族 |
-| `emojiPatch.sizeAdjust` | `80.3%` | 缩放, 保证 emoji 恰好 2 格 |
-| `emojiPatch.patchMarkdownTable` | `true` | 是否包装 markdowntable |
+| 配置                             | 默认                          | 说明                                            |
+| -------------------------------- | ----------------------------- | ----------------------------------------------- |
+| `emojiPatch.codeRoot`            | `/usr/share/code/resources/app` | VSCode app 根目录                             |
+| `emojiPatch.codeFont`            | `""`                          | 要顶替的族名; 空则自动取 `editor.fontFamily` 第一个族 |
+| `emojiPatch.oxfmtPath`           | `""`                          | oxfmt 可执行文件路径; 空则自动探测               |
+| `emojiPatch.notoFamily`          | `Noto Color Emoji`            | 颜色 emoji 字体族                                |
+| `emojiPatch.sizeAdjust`          | `80.3%`                       | 缩放, 保证 emoji 恰好 2 格                       |
+| `emojiPatch.patchMarkdownTable`  | `true`                        | 是否包装 markdowntable                           |
 
 ## 激活时机
 
@@ -356,7 +392,7 @@ VSCode 由 AUR 安装, 安装脚本是现成的, 不应改动; `/usr/share/code`
 
 ```
 vscode-emoji-patch/
-├── DESIGN.md
+├── DESIGN.md                    # 本文档
 ├── README.md
 ├── package.json                 # 扩展清单 (id: lhs-12.emoji-patch)
 ├── tsconfig.json
@@ -385,15 +421,14 @@ vscode-emoji-patch/
 输出: "U+231A-231B, U+23E9-23EC, ... , U+1F202, U+1F237"
 ```
 
-- 解析按上文规则; 相邻码点合并成区间 (结果 86 段).
+- 解析按 [上文规则](#unicode-range-的码点集合); 相邻码点合并成区间 (结果 86 段).
 - 6 个 CJK 全角码点并入集合后一起合并.
 - 网络失败时从当前 `workbench.html` 里已有的 `unicode-range` 读回 (不落缓存).
 
 ### CSS 块
 
-固定用 `/* == emoji-patch:start == */` 与 `/* == emoji-patch:end == */` 包围, 只替换两者之间, 天然幂等.
-
-具体插入位置: `</head>` 之前 (按 `</head>` 行的缩进对齐). 读写按 UTF-8 原始字节, 不做损坏性转换.
+固定用 `/* == emoji-patch:start == */` 与 `/* == emoji-patch:end == */` 包围, 只替换两者之间, 天然幂等.  
+插入位置: `</head>` 之前 (按 `</head>` 行的缩进对齐). 读写按 UTF-8 原始字节, 不做损坏性转换.
 
 ### product.json 只做文本级替换
 
@@ -406,10 +441,6 @@ text.replace(re, `$1${newChecksum}$2`);
 
 这样其余内容 (含缩进/顺序) 一字节不变.
 
-### 数据获取
-
-每次执行 `apply` 时直接联网拉 `emoji-sequences.txt` 解析, 不落缓存. 网络失败时回退: 从当前 `workbench.html` 里已有的 `unicode-range` 读出上次的码点集合.
-
 ### 包装的幂等
 
 用模块上的标记 (`helper.__emojiPatchWrapped`) 防止重复包装. 包装函数闭包缓存 `orig`.
@@ -420,23 +451,23 @@ text.replace(re, `$1${newChecksum}$2`);
 
 遵循 oxc / VoidZero 生态, 包管理用 aube.
 
-| 用途 | 选择 | 命令 |
-| --- | --- | --- |
-| 包管理 | aube | `aube add -D <pkg>` / `aube install` |
-| 临时执行 | aubx | `aubx @vscode/vsce package` (代替 npx) |
-| 运行脚本 | aubr | `aubr build` (代替 npm run) |
-| 语法检查 | oxlint | `oxlint` |
-| 代码格式化 | oxfmt | `oxfmt .` |
-| 编译 | tsc | `tsc -p .` |
-| 扩展打包 | @vscode/vsce | `aubx @vscode/vsce package` |
-| 运行时依赖 | **0 个** | 只用 Node 内置 + `vscode` API + spawn 外部 oxfmt |
+| 用途       | 选择          | 命令                                         |
+| ---------- | ------------- | -------------------------------------------- |
+| 包管理     | aube          | `aube add -D <pkg>` / `aube install`         |
+| 临时执行   | aubx          | `aubx @vscode/vsce package` (代替 npx)       |
+| 运行脚本   | aubr          | `aubr build` (代替 npm run)                  |
+| 语法检查   | oxlint        | `oxlint src test`                            |
+| 代码格式化 | oxfmt         | `oxfmt src test package.json tsconfig.json`  |
+| 编译       | tsc           | `tsc -p .`                                   |
+| 扩展打包   | @vscode/vsce  | `aubx @vscode/vsce package`                  |
+| 运行时依赖 | **0 个**      | 只用 Node 内置 + `vscode` API + spawn 外部 oxfmt |
 
 说明:
 
 - lockfile 为 `aube-lock.yaml`.
 - oxlint / oxfmt 由 **mise** 全局提供 (符合"开发工具用 mise"原则), 不进 devDependencies.
 - 扩展规模很小 (零运行时依赖), `tsc` 直出 `out/` 即可, **不需要打包器**.
-- 若日后确实要打单文件, 按你的偏好选 **rolldown** (VoidZero), 输出 CJS 并 externalize `vscode`.
+- 若日后确实要打单文件, 按偏好选 **rolldown** (VoidZero), 输出 CJS 并 externalize `vscode`.
 - `@vscode/vsce` 是唯一非 oxc 生态的项 (微软官方的扩展打包工具), 无法替代.
 - 项目自身的 lint/format 用 oxlint/oxfmt; 扩展**运行时**也调 oxfmt, 同一条链.
 
@@ -448,66 +479,159 @@ text.replace(re, `$1${newChecksum}$2`);
 
 ## 被写入的 VSCode 安装文件 (2 个, 需提权)
 
-| 路径 | 改动量 |
-| --- | --- |
-| `/usr/share/code/resources/app/out/vs/code/electron-browser/workbench/workbench.html` | 插入/替换一个 `/* emoji-patch:start */ … /* emoji-patch:end */` 标记块 |
-| `/usr/share/code/resources/app/product.json` | **只改一个 key**: `checksums["vs/code/electron-browser/workbench/workbench.html"]` |
+| 路径                                                                                     | 改动量                                                                            |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `/usr/share/code/resources/app/out/vs/code/electron-browser/workbench/workbench.html`     | 插入/替换一个 `/* emoji-patch:start */ … /* emoji-patch:end */` 标记块             |
+| `/usr/share/code/resources/app/product.json`                                             | **只改一个 key**: `checksums["vs/code/electron-browser/workbench/workbench.html"]` |
 
 ## 被"减少"内容的文件 (1 个)
 
-| 路径 | 改动 |
-| --- | --- |
-| `~/.config/Code/User/settings.json` (→ dotfiles 仓库符号链接) | 删掉手写的 `'EmojiPatch', ` 前缀, 以后不再需要 |
+| 路径                                                    | 改动                                              |
+| ------------------------------------------------------- | ------------------------------------------------- |
+| `~/.config/Code/User/settings.json` (→ dotfiles 符号链接) | 删掉手写的 `'EmojiPatch', ` 前缀, 以后不再需要    |
 
 ## 新增的文件/目录
 
-| 路径 | 说明 |
-| --- | --- |
-| `~/.vscode/extensions/lhs-12.emoji-patch-<ver>/` | 扩展本体 |
-| `~/.vscode/extensions/extensions.json` | VSCode 自己维护的扩展清单 (装/卸扩展必然变动) |
-| `/tmp/emoji-patch-<rand>/` | 临时目录, 成功即删 |
-| `~/.config/Code/User/globalStorage/lhs-12.emoji-patch/` | 仅当扩展使用 `globalStorageUri` 时才存在; 本设计不使用 |
+| 路径                                                       | 说明                                                       |
+| ---------------------------------------------------------- | ---------------------------------------------------------- |
+| `~/.vscode/extensions/lhs-12.emoji-patch-<ver>/`           | 扩展本体                                                   |
+| `~/.vscode/extensions/extensions.json`                     | VSCode 自己维护的扩展清单 (装/卸扩展必然变动)              |
+| `/tmp/emoji-patch-<rand>/`                                 | 临时目录, 成功即删                                         |
+| `~/.config/Code/User/globalStorage/lhs-12.emoji-patch/`    | 仅当扩展使用 `globalStorageUri` 时才存在; 本设计不使用     |
 
 ## 完全不改
 
-| 对象 | 说明 |
-| --- | --- |
-| markdowntable 的 `out/*.js` | 只在内存包装 `toFormatTableStr` |
-| 系统字体 / fontconfig | 不新增字体文件, 只 `@font-face` 引用现有 Noto |
-| dotfiles 仓库其它文件 | — |
-| `~/.cache/emoji-patch` | 不使用, 无持久数据目录 |
+| 对象                    | 说明                                            |
+| ----------------------- | ----------------------------------------------- |
+| markdowntable 的 `out/*.js` | 只在内存包装 `toFormatTableStr`             |
+| 系统字体 / fontconfig   | 不新增字体文件, 只 `@font-face` 引用现有 Noto   |
+| dotfiles 仓库其它文件   | —                                               |
+| `~/.cache/emoji-patch`  | 不使用, 无持久数据目录                          |
 
 ## 生命周期
 
-| 事件 | 结果 |
-| --- | --- |
-| VSCode 升级 | `workbench.html` / `product.json` 被覆盖 → patch 痕迹**自动清零**, 跑一次"应用"恢复 |
-| `emojiPatch.disable` | 删标记块并还原 checksum → 回到出厂状态 |
-| 卸载扩展 | 删 `~/.vscode/extensions/lhs-12.emoji-patch-*` → 无残留 |
-| 每日常态 | 除 2 个安装文件的内容差异外, 零额外痕迹; 无后台进程 |
+| 事件                       | 结果                                                                     |
+| -------------------------- | ------------------------------------------------------------------------ |
+| VSCode / pacman 升级       | `workbench.html` / `product.json` 被覆盖 → patch 痕迹**自动清零**, 跑一次"生效"恢复 (`settings.json` 不受影响) |
+| `Emoji Patch: 失效`        | 删标记块并还原 checksum → 回到出厂状态                                   |
+| 卸载扩展                   | 删 `~/.vscode/extensions/lhs-12.emoji-patch-*` → 无残留                  |
+| 每日常态                   | 除 2 个安装文件的内容差异外零额外痕迹; 无后台进程                        |
 
 ---
 
-# 风险与待验证
+# 排错与恢复
 
-| 项 | 说明 | 处理 |
-| --- | --- | --- |
-| 族名顶替在真实 VSCode 里的表现 | 目前仅在本地 Edge 验证; VSCode 用 Electron, 应一致 | 骨架阶段实测: 字重/斜体/连字/字号是否正常 |
-| markdowntable 内部结构变化 | require 路径或函数名变化 | try/catch + 状态命令提示 |
-| pkexec 在扩展宿主的弹窗 | 无 TTY, 依赖 polkit agent | 实测; 失败给出脚本路径手动执行 |
-| VSCode 升级后 `product.json` 结构变化 | checksum key 位置 | 状态命令检测并提示 |
-| 非 ASCII 路径/编码 | `workbench.html` 读写编码 | 按字节处理 (`Buffer`), 不做编码转换 |
+## 确认是否生效
+
+- 看 `✅❌` 是否变彩色; 或 `Toggle Developer Tools` 里选中 `.monaco-editor` 看 computed `font-family`.
+- 命令面板 → `Developer: Show Running Extensions`, 确认 `lhs-12.emoji-patch` 已激活.
+- 扩展宿主日志里会有一行 `[emoji-patch] workbench: 已注入; 表格格式化: oxfmt`.
+
+## 常见失败
+
+| 现象                          | 处理                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| pkexec 弹窗没出现 / 被拒       | 错误通知里点"复制脚本路径", 再 `sudo bash <脚本>`; 效果与自动写入一致                    |
+| 提示"安装损坏"                | checksum 没同步 (例如手工改了 `workbench.html`). 重跑一次"生效"即可                      |
+| emoji 仍是单色                | 查 `editor.fontFamily` 第一个族是否与 `@font-face` 里的族名一致; 看扩展日志里的族名       |
+| 表格仍按 markdowntable 宽度排 | 表格包装没生效 (缺 oxfmt 或 markdowntable 结构变了), 看命令结果通知里的提示               |
+
+## 恢复原状
+
+- 优先: 命令 `Emoji Patch: 失效`.
+- 兜底: `sudo pacman -S visual-studio-code-bin` 重装, 直接覆盖那两个文件.
+- 卸载: 扩展面板卸载 `lhs-12.emoji-patch`.
 
 ---
 
-# 里程碑 (全部完成)
+# 风险与遗留
 
-| # | 内容 | 状态 |
-| --- | --- | --- |
-| 1 | 骨架: 扩展激活, 注册 `生效` / `失效` 两个命令 | ✅ |
-| 2 | 点在内存包装 `toFormatTableStr`, 用真实 markdowntable 模块验证输出 == oxfmt | ✅ |
-| 3 | 按族名顶替法生成 CSS 块, 注入后 emoji 分流且普通文本不受影响 | ✅ |
-| 4 | `pkexec` 提权写入 + checksum 同步 + 幂等 (用假 pkexec + 假 codeRoot 做端到端) | ✅ |
-| 5 | 收尾: 移除 dotfiles 里 `'EmojiPatch', ` 前缀; 更新 `software-config` 的 plan 文档 | 待办 |
+| 项                                      | 说明                                          | 处理                                                |
+| --------------------------------------- | --------------------------------------------- | --------------------------------------------------- |
+| 族名顶替在真实 VSCode 里的表现          | 仅在本地 Edge 验证过; VSCode 用 Electron, 应一致 | 待真实 VSCode 里实测字重/斜体/连字/字号             |
+| markdowntable 内部结构变化              | require 路径或函数名变化                      | try/catch + 命令结果里提示                          |
+| pkexec 在扩展宿主的弹窗                 | 无 TTY, 依赖 polkit agent                     | 失败时给出脚本路径手动执行                          |
+| VSCode 升级后 `product.json` 结构变化   | checksum key 位置                             | 找不到 key 时报错并保留临时脚本                     |
+| 非 ASCII 路径 / 编码                    | `workbench.html` 读写                         | 按 UTF-8 字节处理, 不做编码转换                     |
 
-未自动化的最后一步: 在真实的 root 目录上跑一次 "生效" 并接受 polkit 弹窗.
+# 里程碑
+
+| # | 内容                                                                     | 状态 |
+| - | ------------------------------------------------------------------------ | ---- |
+| 1 | 骨架: 扩展激活, 注册 `生效` / `失效` 两个命令                            | ✅   |
+| 2 | 内存包装 `toFormatTableStr`, 用真实 markdowntable 模块验证输出 == oxfmt  | ✅   |
+| 3 | 按族名顶替法生成 CSS 块, 注入后 emoji 分流且普通文本不受影响             | ✅   |
+| 4 | `pkexec` 提权写入 + checksum 同步 + 幂等 (假 pkexec + 假 codeRoot 端到端) | ✅   |
+| 5 | 收尾: 移除 dotfiles 里 `'EmojiPatch', ` 前缀; 删除旧的 plan 文档          | 待办 |
+
+未自动化的最后一步: 在真实的 root 目录上跑一次"生效"并接受 polkit 弹窗.
+
+---
+
+# 附录: unicode-range 参考
+
+`Emoji_Presentation=Yes` (1228) + 9 个修饰符基码 + 6 个 CJK 全角 = 1243 个码点, 合并后 86 段:
+
+```css
+unicode-range:
+    U+231A-231B, U+23E9-23EC, U+23F0, U+23F3, U+25FD-25FE, U+2614-2615,
+    U+261D, U+2648-2653, U+267F, U+2693, U+26A1, U+26AA-26AB,
+    U+26BD-26BE, U+26C4-26C5, U+26CE, U+26D4, U+26EA, U+26F2-26F3,
+    U+26F5, U+26F9-26FA, U+26FD, U+2705, U+270A-270D, U+2728,
+    U+274C, U+274E, U+2753-2755, U+2757, U+2795-2797, U+27B0,
+    U+27BF, U+2B1B-2B1C, U+2B50, U+2B55, U+3030, U+303D,
+    U+3297, U+3299, U+1F004, U+1F0CF, U+1F18E, U+1F191-1F19A,
+    U+1F1E6-1F1FF, U+1F201-1F202, U+1F21A, U+1F22F, U+1F232-1F23A, U+1F250-1F251,
+    U+1F300-1F320, U+1F32D-1F335, U+1F337-1F37C, U+1F37E-1F393, U+1F3A0-1F3CC, U+1F3CF-1F3D3,
+    U+1F3E0-1F3F0, U+1F3F4, U+1F3F8-1F43E, U+1F440, U+1F442-1F4FC, U+1F4FF-1F53D,
+    U+1F54B-1F54E, U+1F550-1F567, U+1F574-1F575, U+1F57A, U+1F590, U+1F595-1F596,
+    U+1F5A4, U+1F5FB-1F64F, U+1F680-1F6C5, U+1F6CC, U+1F6D0-1F6D2, U+1F6D5-1F6D9,
+    U+1F6DC-1F6DF, U+1F6EB-1F6EC, U+1F6F4-1F6FC, U+1F7E0-1F7EB, U+1F7F0, U+1F90C-1F93A,
+    U+1F93C-1F945, U+1F947-1F9FF, U+1FA70-1FA7C, U+1FA80-1FAC6, U+1FAC8, U+1FACC-1FADD,
+    U+1FADF-1FAEB, U+1FAEF-1FAFA;
+```
+
+平时不用手算, 格式化成上面结果的逻辑在 `src/range.ts`. 单独跑一遍 (仅当 Unicode 发新版需要核对时, 需联网):
+
+```bash
+python3 - <<'PY'
+import urllib.request
+
+def parse(spec):
+    s = spec.strip()
+    if '..' in s:
+        a, b = s.split('..')
+        return set(range(int(a, 16), int(b, 16) + 1))
+    return {int(s, 16)}
+
+wide = set()
+url = 'https://www.unicode.org/Public/emoji/latest/emoji-sequences.txt'
+for line in urllib.request.urlopen(url).read().decode().splitlines():
+    line = line.strip()
+    if not line or line.startswith('#'):
+        continue
+    fields = [x.strip() for x in line.split(';')]
+    data, etype = fields[0], fields[1]
+    toks = data.split()
+    if etype == 'Basic_Emoji':
+        if len(toks) < 2:
+            wide |= parse(toks[0])
+    elif etype == 'RGI_Emoji_Flag_Sequence':
+        wide |= {int(toks[0], 16), int(toks[1], 16)}
+    elif etype in ('RGI_Emoji_Tag_Sequence', 'RGI_Emoji_Modifier_Sequence'):
+        wide |= parse(toks[0])
+
+# MiSans 缺的 CJK 全角字符
+wide |= {0x3030, 0x303D, 0x3297, 0x3299, 0x1F202, 0x1F237}
+
+ps = sorted(wide)
+ranges, st, pr = [], ps[0], ps[0]
+for x in ps[1:]:
+    if x == pr + 1:
+        pr = x
+    else:
+        ranges.append((st, pr)); st = pr = x
+ranges.append((st, pr))
+print(', '.join(f'U+{a:04X}-{b:04X}' if b > a else f'U+{a:04X}' for a, b in ranges))
+PY
+```
