@@ -4,7 +4,7 @@
 项目目录: `~/MyProjects/vscode-emoji-patch`
 
 个人专用扩展: 让 VSCode 的 emoji 与 kitty 表现一致 (彩色 + 严格 2 格宽), 并让 markdowntable 的表格格式化改走 oxfmt.  
-不含任何通用性设计, 不考虑发布 Marketplace. 日常用法见 `README.md`.
+不含任何通用性设计, 不发布 Marketplace (源码以 MIT 协议公开在 GitHub, 见 `README.md`). 日常用法见 `README.md`.
 
 ---
 

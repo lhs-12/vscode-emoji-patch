@@ -7,6 +7,8 @@
 
 只服务本机这套环境 (Linux + AUR 装的 VSCode), 不打算发到 Marketplace.
 
+源码以 MIT 协议公开: https://github.com/lhs-12/vscode-emoji-patch —— 但所有默认值都是按本机定的, 换环境要照着 `DESIGN.md` 里的实测依据改 (每条结论都注明了怎么测出来的).
+
 ## 装之前 / 装之后
 
 | 场景                                                    | 装之前                                                   | 装之后                                  |

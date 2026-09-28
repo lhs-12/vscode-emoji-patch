@@ -8,6 +8,10 @@
     "Other"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lhs-12/vscode-emoji-patch.git"
+  },
   "publisher": "lhs-12",
   "main": "./out/extension.js",
   "scripts": {
