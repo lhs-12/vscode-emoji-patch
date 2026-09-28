@@ -18,12 +18,13 @@
 | markdown 表格格式化 (Tab 跳格 / 对齐 / Format Document) | markdowntable 自己数字符宽度, 碰到 emoji、全角符号会算错 | 交给 oxfmt 算, 和你手写表格时的口径一致 |
 | Markdown 预览 (MPE / VSCode 自带)                       | emoji 黑白、偏窄 (走预览自己的字体)                      | 和编辑器一致: 彩色, 恰好 2 格宽         |
 
-## 具体改了哪四处
+## 具体改了哪五处
 
 1. **emoji 换字体** —— 只影响 emoji 码点. 其它字符仍然用你配置的第一个字体 (默认 `Iosevka Term`), 字重、斜体、连字都照旧.
 2. **宽度锁成 2 格** —— 为此 emoji 被整体缩到 80.3%, 看起来比 Noto 原本的尺寸小一圈; 换来的是和中文一样宽, 表格不再错位.
 3. **表格格式化换工具** —— markdowntable 的增删行列、Tab 跳格、对齐等操作都改走 oxfmt. 它的安装文件没有被改过, 关掉本扩展就回到原样.
-4. **两种 Markdown 预览也注入同一份字体** —— 拦下预览插件 / VSCode 渲染预览时写的 HTML, 在内存里把 CSS 插进它的 `head`. 不写任何文件: `~/.config/crossnote/` (包括 `style.less`)、MPE 扩展目录、`settings.json` 都没改过.
+4. **字体链的连带效果** —— 如果你在 `Noto Color Emoji` 之前放了 CJK 矢量字体 (本机是 `Noto Sans Mono CJK SC`, 装它是为了让 kitty 这类终端不被彩色位图撑爆), 那么 `☁` `☂` `☃` `✂` 这类"只有彩色位图有字形"的 1 格符号会改用它: 从彩色 2.5 格变成黑白 2.0 格. 仍然对不齐 oxfmt 的 1 格 (见 `DESIGN.md` 的"已知边角"), 表格里照旧不要写它们.
+5. **两种 Markdown 预览也注入同一份字体** —— 拦下预览插件 / VSCode 渲染预览时写的 HTML, 在内存里把 CSS 插进它的 `head`. 不写任何文件: `~/.config/crossnote/` (包括 `style.less`)、MPE 扩展目录、`settings.json` 都没改过.
 
 ## 哪些地方生效
 
