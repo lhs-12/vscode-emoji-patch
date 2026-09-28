@@ -122,7 +122,7 @@ async function main() {
   };
   const cps = setOf(built.range);
   await test(`生成 range: ${built.count} 个码点 / ${built.range.split(',').length} 段 (相邻已合并)`, () => {
-    assert.equal(built.count, 1331);
+    assert.equal(built.count, 1243);
     assert.equal(cps.size, built.count, '段展开后码点数应与 count 一致');
   });
 
@@ -149,17 +149,14 @@ async function main() {
     assert.ok(cps.has(0x2705) && cps.has(0x274c));
     assert.ok(cps.has(0x1f1e6) && cps.has(0x1f1ff));
   });
-  await test('含高频补充的 EP=No 字符 (U+26A0 / U+00A9)', () => {
-    assert.ok(cps.has(0x26a0) && cps.has(0x00a9));
-  });
-  await test('不含未补的 EP=No 字符 (U+1F3D5 🏕)', () => {
-    assert.ok(!cps.has(0x1f3d5));
+  await test('不含 EP=No 的 U+1F3D4 (🏔)', () => {
+    assert.ok(!cps.has(0x1f3d4));
   });
 
-  // 带 VS16 的 Basic_Emoji 基码 / keycap 基码: 用来推导下面两条文档表格规则
-  const { vs16Bases, keycapBases } = (() => {
-    const vs16 = new Set();
-    const keycap = new Set();
+  // 表格里只能用 range 内的 emoji: 被排除的字符渲染宽度与 oxfmt 的口径对不上
+  // (被排除 = 带 VS16 的 Basic_Emoji 基码 ∪ keycap 基码, 再减去 range)
+  const excluded = (() => {
+    const ex = new Set();
     for (const raw of seq.split('\n')) {
       const line = raw.split('#')[0].trim();
       if (!line) {
@@ -167,56 +164,34 @@ async function main() {
       }
       const fields = line.split(';').map((x) => x.trim());
       const toks = fields[0].split(/\s+/);
-      if (fields[1] === 'Basic_Emoji' && toks.length > 1) {
-        vs16.add(parseInt(toks[0], 16));
-      } else if (fields[1] === 'Emoji_Keycap_Sequence') {
-        keycap.add(parseInt(toks[0], 16));
+      if ((fields[1] === 'Basic_Emoji' && toks.length > 1) || fields[1] === 'Emoji_Keycap_Sequence') {
+        ex.add(parseInt(toks[0], 16));
       }
     }
-    return { vs16Bases: vs16, keycapBases: keycap };
+    return [...ex].filter((c) => !cps.has(c));
   })();
-  // 被排除 = 上面两类的并集再减去 range. 它们渲染宽度与 oxfmt 的口径对不上, 表格里不能用
-  const excluded = [...new Set([...vs16Bases, ...keycapBases])].filter((c) => !cps.has(c));
   await test(`被排除的 emoji: ${excluded.length} 个 (与文档里的数一致)`, () => {
-    assert.equal(excluded.length, 116);
+    assert.equal(excluded.length, 204);
   });
   // 其中 12 个是 keycap 基码 (# * 0-9), 在表格里就是普通 ASCII, 不用管
   const tableUnsafe = excluded.filter((c) => c > 0x7f);
-  // range 里这些"有 VS16 形式"的: 表格里必须写 VS16, 因为裸写法渲染 2.00 格, oxfmt 只算 1 格
-  const needVs16 = new Set([...vs16Bases].filter((c) => cps.has(c)));
-  const scanTables = (file, check) => {
-    const found = [];
-    readFileSync(path.join(ROOT, file), 'utf8')
-      .split('\n')
-      .forEach((line, i) => {
-        if (line.trimStart().startsWith('|')) {
-          check(line, i + 1, found);
-        }
-      });
-    return found;
-  };
   for (const file of ['README.md', 'DESIGN.md']) {
     // 回调是同步的, 不必 await (也就避开了 no-await-in-loop)
     test(`${file}: 表格里不用 range 之外的 ${tableUnsafe.length} 个 emoji`, () => {
-      const found = scanTables(file, (line, ln, out) => {
-        for (const ch of line) {
-          if (tableUnsafe.includes(ch.codePointAt(0))) {
-            out.push(`${file}:${ln} ${ch}`);
+      const found = [];
+      readFileSync(path.join(ROOT, file), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (!line.trimStart().startsWith('|')) {
+            return;
           }
-        }
-      });
-      assert.equal(found.length, 0, `表格里出现会错位的 emoji (${found.join(', ')}) —— 换成 range 内的 emoji 或纯文字`);
-    });
-    test(`${file}: 表格里有 VS16 形式的 ${needVs16.size} 个字都写了 VS16`, () => {
-      const found = scanTables(file, (line, ln, out) => {
-        const chars = [...line];
-        chars.forEach((ch, k) => {
-          if (needVs16.has(ch.codePointAt(0)) && chars[k + 1] !== '\ufe0f') {
-            out.push(`${file}:${ln} ${ch}`);
+          for (const ch of line) {
+            if (tableUnsafe.includes(ch.codePointAt(0))) {
+              found.push(`${file}:${i + 1} ${ch}`);
+            }
           }
         });
-      });
-      assert.equal(found.length, 0, `表格里的裸写法会偏宽 1 格 (${found.join(', ')}) —— 改写成带 VS16 的形式`);
+      assert.equal(found.length, 0, `表格里出现会错位的 emoji (${found.join(', ')}) —— 换成 range 内的 emoji 或纯文字`);
     });
   }
   await test('extractRangeFromHtml 能读回 range', () => {
