@@ -25,7 +25,6 @@ export function hijackTableFormatter(extensionPath: string, oxfmt: string): Hija
   if (!existsSync(helperPath)) {
     return { wrapped: false, message: `找不到 ${helperPath}` };
   }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const helper = require(helperPath) as MarkdownTableHelper;
   if (helper.__emojiPatchWrapped === true) {
     return { wrapped: true, message: '已包装' };

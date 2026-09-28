@@ -13,9 +13,9 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . --watch",
-    "lint": "oxlint src test",
-    "format": "oxfmt src test package.json tsconfig.json",
-    "check": "tsc -p . --noEmit && oxlint src test",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "check": "tsc -p . --noEmit && oxlint",
     "test": "node test/run.js",
     "package": "aube dlx @vscode/vsce package --allow-missing-repository"
   },
@@ -76,5 +76,6 @@
   ],
   "engines": {
     "vscode": "^1.138.0"
-  }
+  },
+  "//@types/node": "大版本必须与 mise.toml 里的 node (lts) 一致 —— 它描述的是运行时 Node 的 API 面, 落后会误报, 超前会放行运行时没有的 API"
 }

@@ -5,7 +5,8 @@
  */
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
-const { readFileSync, existsSync } = require('node:fs');
+const { readFileSync, existsSync, readdirSync } = require('node:fs');
+const { homedir } = require('node:os');
 const Module = require('node:module');
 const path = require('node:path');
 
@@ -15,7 +16,19 @@ const CODE_ROOT = '/usr/share/code/resources/app';
 const WORKBENCH = path.join(CODE_ROOT, 'out/vs/code/electron-browser/workbench/workbench.html');
 const PRODUCT = path.join(CODE_ROOT, 'product.json');
 const DESIGN_DOC = path.join(ROOT, 'DESIGN.md');
-const MDT_EXT = '/home/hans/.vscode/extensions/takumii.markdowntable-0.13.0';
+
+/** 取已安装的最新 markdowntable —— 目录名带版本号, 不能写死. */
+function findMdtExt() {
+  const root = path.join(homedir(), '.vscode', 'extensions');
+  if (!existsSync(root)) {
+    return undefined;
+  }
+  const dirs = readdirSync(root)
+    .filter((d) => d.startsWith('takumii.markdowntable-'))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return dirs.length > 0 ? path.join(root, dirs[dirs.length - 1]) : undefined;
+}
+const MDT_EXT = findMdtExt();
 
 const range = require(path.join(OUT, 'range.js'));
 const cssBlock = require(path.join(OUT, 'cssBlock.js'));
@@ -51,6 +64,39 @@ function ko(name, e) {
 }
 function section(t) {
   console.log(`\n${t}`);
+}
+
+/** markdowntable 的 helper 模块加载时会 require('vscode'), 用 stub 顶掉. */
+const MDT_VSCODE_STUB = {
+  workspace: {
+    getConfiguration: () => ({
+      get: (k) =>
+        ({
+          alignData: true,
+          alignColumnHeader: true,
+          paddedDelimiterRowPipes: true,
+          ignoreCodeblock: true,
+        })[k.split('.').pop()],
+    }),
+  },
+};
+
+/** 干净地加载 (或重新加载) markdowntable 的 helper 模块. */
+function loadMdtHelper() {
+  const p = path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js');
+  delete require.cache[p];
+  const origLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === 'vscode') {
+      return MDT_VSCODE_STUB;
+    }
+    return origLoad.call(this, request, parent, isMain);
+  };
+  try {
+    return require(p);
+  } finally {
+    Module._load = origLoad;
+  }
 }
 
 async function main() {
@@ -205,37 +251,11 @@ async function main() {
 
   // ---------------------------------------------------------------- hijack
   section('hijack.ts (用真实 markdowntable 模块)');
-  if (!existsSync(MDT_EXT)) {
+  if (!MDT_EXT) {
     console.log('  - 跳过 (未安装 markdowntable)');
   } else {
     await test('包装后输出 == oxfmt 输出', () => {
-      // 1) 用 stub 的 vscode 直接加载真实模块 (与扩展宿主同款手法)
-      const stub = {
-        workspace: {
-          getConfiguration: () => ({
-            get: (k) =>
-              ({
-                alignData: true,
-                alignColumnHeader: true,
-                paddedDelimiterRowPipes: true,
-                ignoreCodeblock: true,
-              })[k.split('.').pop()],
-          }),
-        },
-      };
-      const origLoad = Module._load;
-      Module._load = function (request, parent, isMain) {
-        if (request === 'vscode') {
-          return stub;
-        }
-        return origLoad.call(this, request, parent, isMain);
-      };
-      let helper;
-      try {
-        helper = require(path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js'));
-      } finally {
-        Module._load = origLoad;
-      }
+      const helper = loadMdtHelper();
       const table = [
         '| 名称 | 状态 | 说明 |',
         '| --- | --- | --- |',
@@ -265,37 +285,12 @@ async function main() {
       assert.equal(lines.length, 5, `行数应为 5, 实际 ${lines.length}`);
     });
     await test('oxfmt 找不到时退回原样', () => {
-      const origLoad = Module._load;
-      Module._load = function (request, parent, isMain) {
-        if (request === 'vscode') {
-          return {
-            workspace: {
-              getConfiguration: () => ({
-                get: (k) =>
-                  ({
-                    alignData: true,
-                    alignColumnHeader: true,
-                    paddedDelimiterRowPipes: true,
-                    ignoreCodeblock: true,
-                  })[k.split('.').pop()],
-              }),
-            },
-          };
-        }
-        return origLoad.call(this, request, parent, isMain);
-      };
-      let helper2;
-      try {
-        delete require.cache[path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js')];
-        helper2 = require(path.join(MDT_EXT, 'out', 'markdownTableDataHelper.js'));
-      } finally {
-        Module._load = origLoad;
-      }
-      const data = helper2.stringToTableData('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
+      const helper = loadMdtHelper();
+      const data = helper.stringToTableData('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
       // 用一个不存在的 oxfmt 路径包装 -> 必须退回 orig
       const res = hijack.hijackTableFormatter(MDT_EXT, '/nonexistent/oxfmt');
       assert.equal(res.wrapped, true);
-      const got = helper2.toFormatTableStr(data);
+      const got = helper.toFormatTableStr(data);
       assert.ok(typeof got === 'string' && got.includes('| a'), '应返回 markdowntable 原始结果');
     });
   }

@@ -7,5 +7,5 @@
   "trailingComma": "all",
   "arrowParens": "always",
   "endOfLine": "lf",
-  "ignorePatterns": []
+  "ignorePatterns": ["aube-lock.yaml"]
 }

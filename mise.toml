@@ -2,7 +2,7 @@
 # 版本写法与全局 ~/.config/mise/config.toml 完全一致, 以便 mise 直接复用全局已装的
 # 版本, 不重复下载. 详见 DESIGN.md 的"工具链"章节.
 [tools]
-node   = "lts"
-aube   = "latest"
-oxfmt  = "latest" # 不只是开发工具, 也是扩展的运行时依赖 (劫持表格格式化时 spawn 它)
+node = "lts" # 24. 改这里时必须同步 package.json 里 @types/node 的大版本
+aube = "latest"
+oxfmt = "latest" # 不只是开发工具, 也是扩展的运行时依赖 (劫持表格格式化时 spawn 它)
 oxlint = "latest"
